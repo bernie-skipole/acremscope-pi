@@ -1,37 +1,79 @@
-## Welcome to GitHub Pages
+## Pi build
 
-You can use the [editor on GitHub](https://github.com/bernie-skipole/acremscope-pi/edit/main/docs/index.md) to maintain and preview the content for your website in Markdown files.
+With the latest Raspberry Pi os, create the user bernard, with passwords for both the bernard and pi usernames.
 
-Whenever you commit to this repository, GitHub Pages will run [Jekyll](https://jekyllrb.com/) to rebuild the pages in your site, from the content in your Markdown files.
+adduser bernard
 
-### Markdown
+Enable ssh, and generate ssh keys.
 
-Markdown is a lightweight and easy-to-use syntax for styling your writing. It includes conventions for
+ssh-keygen -t rsa -b 4096 -C “bernie@skipole.co.uk”
 
-```markdown
-Syntax highlighted code block
+From laptop, swap ssh keys with the pi, as user bernard:
 
-# Header 1
-## Header 2
-### Header 3
+ssh-copy-id bernard@pi_ip_address
 
-- Bulleted
-- List
+Alternatively, your public key is in
+~/.ssh/id_rsa.pub
 
-1. Numbered
-2. List
+and this can be copied to a remote file
+~/.ssh/authorized_keys
 
-**Bold** and _Italic_ and `Code` text
+as root - from user pi
 
-[Link](url) and ![Image](src)
-```
+sudo /bin/bash
 
-For more details see [GitHub Flavored Markdown](https://guides.github.com/features/mastering-markdown/).
+Install redis, indi-bin and mosquitto
 
-### Jekyll Themes
+apt-get install redis
 
-Your Pages site will use the layout and styles from the Jekyll theme you have selected in your [repository settings](https://github.com/bernie-skipole/acremscope-pi/settings). The name of this theme is saved in the Jekyll `_config.yml` configuration file.
+apt-get install mosquitto
 
-### Support or Contact
+apt-get install indi-bin
 
-Having trouble with Pages? Check out our [documentation](https://docs.github.com/categories/github-pages-basics/) or [contact support](https://support.github.com/contact) and we’ll help you sort it out.
+as bernard
+
+Create a virtual environment
+
+python3 -m venv /home/bernard/acenv
+
+and activate
+
+source acenv/bin/activate
+
+install python dependencies
+
+pip install indiredis
+
+this also pulls in packages skipole, waitress, redis, paho-mqtt, indi-mr.
+
+Create a folder ~/indiblobs
+
+Create a folder ~/indi and copy files from this repository into it , and install the services
+
+mqtttunnel.service
+remoteaccess.service
+remscopedrivers.service
+
+
+For example
+
+As root, set mqtttunnel.service into the system directory as:
+
+/lib/systemd/system/mqtttunnel.service
+
+Enable the service with the following commands:
+systemctl daemon-reload
+systemctl enable mqtttunnel.service
+systemctl start mqtttunnel
+
+Repeat for each service.
+
+
+
+
+
+
+
+
+
+
