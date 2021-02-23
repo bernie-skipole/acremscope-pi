@@ -1,0 +1,13 @@
+<newSwitchVector device="Roll off door" name="DOME_SHUTTER">
+<oneSwitch name="SHUTTER_OPEN">On</oneSwitch>
+</newSwitchVector>
+
+
+<newSwitchVector device="Roll off door" name="DOME_SHUTTER">
+<oneSwitch name="SHUTTER_OPEN">Off</oneSwitch>
+</newSwitchVector>
+
+
+<getProperties version="1.7" device="Network Monitor" name="TenSecondHeartbeat" />
+
+<getProperties version="1.7" />

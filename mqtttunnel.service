@@ -1,0 +1,20 @@
+
+[Unit]
+Description=Tunnel to mqtt server
+After=network.target
+
+[Service]
+User=bernard
+Restart=on-failure
+RestartSec=5
+ExecStart=/usr/bin/ssh -NT -o ServerAliveInterval=60 -o ExitOnForwardFailure=yes -L 1883:10.105.192.1:1883 bernard@webparametrics.co.uk
+
+# Connects standard output to /dev/null
+StandardOutput=null
+
+# Connects standard error to journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+

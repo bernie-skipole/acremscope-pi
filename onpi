@@ -1,0 +1,16 @@
+
+To connect to pi
+ssh 192.168.1.87
+
+If you want gui
+vncserver -Authentication VncAuth :1
+
+
+ssh -f -L 1883:10.105.192.1:1883 webparametrics.co.uk -N
+
+
+source acenv/bin/activate
+
+cd indi
+
+python3 mqttdrivers.py
