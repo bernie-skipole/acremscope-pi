@@ -11,5 +11,7 @@ mqtt_host = mqtt_server(host='localhost', port=1883)
 driverstomqtt([ "/home/bernard/indi/leddriver.py",
                 "/home/bernard/indi/networkmonitor.py",
                 "/home/bernard/indi/temperaturedriver.py",
-                "/home/bernard/indi/doordriver.py"], 'pi_01', mqtt_host)
+                "/home/bernard/indi/doordriver.py",
+                "indi_simulator_telescope",
+                "indi_simulator_ccd"], 'pi_01', mqtt_host)
 

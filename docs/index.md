@@ -51,7 +51,9 @@ Create a folder ~/indiblobs
 Create a folder ~/indi and copy files from this repository into it , and install the services
 
 mqtttunnel.service
+
 remoteaccess.service
+
 remscopedrivers.service
 
 
@@ -62,12 +64,20 @@ As root, set mqtttunnel.service into the system directory as:
 /lib/systemd/system/mqtttunnel.service
 
 Enable the service with the following commands:
+
 systemctl daemon-reload
+
 systemctl enable mqtttunnel.service
+
 systemctl start mqtttunnel
 
 Repeat for each service.
 
+mqtttunnel creates a remote ssh tunnel to webparametrics.co.uk allowing acremscope to access the mqtt server running on the pi
+
+remoteaccess creates a remote ssh tunnel to webparametrics.co.uk allowing ssh access to the pi
+
+remscopedrivers runs remscopedrivers.py which calls indi_mr.driverstomqtt to run the indi drivers and communicates to the mqtt server
 
 
 
