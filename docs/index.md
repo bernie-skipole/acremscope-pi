@@ -56,6 +56,7 @@ remoteaccess.service
 
 remscopedrivers.service
 
+indiclient.service
 
 For example
 
@@ -78,6 +79,9 @@ mqtttunnel creates a remote ssh tunnel to webparametrics.co.uk allowing acremsco
 remoteaccess creates a remote ssh tunnel to webparametrics.co.uk allowing ssh access to the pi
 
 remscopedrivers runs remscopedrivers.py which calls indi_mr.driverstomqtt to run the indi drivers and communicates to the mqtt server
+
+indiclient runs a web based, password protected indi client on port 8000, for local control of the telescope.
+
 
 
 

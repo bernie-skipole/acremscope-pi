@@ -1,0 +1,22 @@
+
+[Unit]
+Description=local indi client web service
+After=multi-user.target
+
+[Service]
+Type=idle
+ExecStart=/home/bernard/indi/indiclient.py
+
+User=bernard
+
+Restart=on-failure
+
+# Connects standard output to /dev/null
+StandardOutput=null
+
+# Connects standard error to journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+
