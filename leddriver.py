@@ -17,6 +17,8 @@ import xml.etree.ElementTree as ET
 
 from datetime import datetime
 
+import picoserial
+
 # All xml data received on the port from the client should be contained in one of the following tags
 TAGS = (b'getProperties',
   #      b'newTextVector',
@@ -52,8 +54,9 @@ class _LED:
     def __init__(self, led, loop):
         "Sets the data used by the data handler"
         self.loop = loop
-        self.led = led
         self.sender = collections.deque(maxlen=100)
+        # send the initial state to the pico
+        picoserial.set_led(led)
 
 
     async def handle_data(self):
@@ -117,12 +120,7 @@ class _LED:
                         messagetagnumber = None
                         continue
                     ########### RUN HARDWARECONTROL ###############
-
-                    # if blocking
-                    # self.led = await self.loop.run_in_executor(None, _hardwarecontrol, root, self.sender, self.led)
-
-                    # if not blocking
-                    self.led = _hardwarecontrol(root, self.sender, self.led)
+                    _hardwarecontrol(root, self.sender)
 
                     # and start again, waiting for a new message
                     message = b''
@@ -143,12 +141,7 @@ class _LED:
                     messagetagnumber = None
                     continue
                 ########### RUN HARDWARECONTROL ###############
-
-                # if blocking
-                # self.led = await self.loop.run_in_executor(None, _hardwarecontrol, root, self.sender, self.led)
-
-                # if not blocking
-                self.led = _hardwarecontrol(root, self.sender, self.led)
+                _hardwarecontrol(root, self.sender)
 
                 # and start again, waiting for a new message
                 message = b''
@@ -156,9 +149,9 @@ class _LED:
 
 
 
-def _hardwarecontrol(root, sender, led):
+def _hardwarecontrol(root, sender):
     """Handles the received XML and, if data is to be sent,
-       sets xml in the sender deque. Returns the new led state"""
+       sets xml in the sender deque. Sets led status via picoserial"""
 
     # this timestamp is the time at which the data is received
     # timestamp = datetime.utcnow().isoformat(sep='T')
@@ -170,22 +163,23 @@ def _hardwarecontrol(root, sender, led):
 
         version = root.get("version")
         if version != "1.7":
-            return led
+            return
 
         device = root.get("device")
         # device must be None (for all devices), or 'Rempi01 LED' which is this device
         if (not (device is None)) and (device != 'Rempi01 LED'):
             # not a recognised device
-            return led
+            return
 
         name = root.get("name")
         # name must be None (for all properties), or 'LED' which is the only property
         # of this device
         if (not (name is None)) and (name != 'LED'):
             # not a recognised property
-            return led
+            return
 
-        # normally would do an hardware check of the led status
+        # do an hardware check of the led status
+        led = picoserial.get_led()
 
         # create the responce
         xmldata = ET.Element('defSwitchVector')
@@ -212,10 +206,8 @@ def _hardwarecontrol(root, sender, led):
         else:
             se_off.text = "On"
         xmldata.append(se_off)
-        newled = led
+
     elif root.tag == "newSwitchVector":
-        # normally the new value would be set in hardware, in this case it is set
-        # into the led value returned
 
         # expecting something like
         # <newSwitchVector device="Rempi01 LED" name="LED">
@@ -226,16 +218,17 @@ def _hardwarecontrol(root, sender, led):
         # device must be  'Rempi01 LED' which is this device
         if device != 'Rempi01 LED':
             # not a recognised device
-            return led
+            return
 
         name = root.get("name")
         # name must be 'LED' which is the only property
         # of this device
         if name != 'LED':
             # not a recognised property
-            return led
+            return
 
-        newled = led
+        # get current led status
+        led = picoserial.get_led()
 
         switchlist = root.findall("oneSwitch")
         for setting in switchlist:
@@ -244,13 +237,16 @@ def _hardwarecontrol(root, sender, led):
             # get switch On or Off, remove newlines
             content = setting.text.strip()
             if (pn == "LED ON") and (content == "On"):
-                newled = True
+                led = True
             if (pn == "LED ON") and (content == "Off"):
-                newled = False
+                led = False
             if (pn == "LED OFF") and (content == "On"):
-                newled = False
+                led = False
             if (pn == "LED OFF") and (content == "Off"):
-                newled = True
+                led = True
+
+        # send this led state to the pico
+        picoserial.set_led(led)
 
         # send setSwitchVector vector
         # create the response
@@ -263,7 +259,7 @@ def _hardwarecontrol(root, sender, led):
 
         se_on = ET.Element('oneSwitch')
         se_on.set("name", "LED ON")
-        if newled:
+        if led:
             se_on.text = "On"
         else:
             se_on.text = "Off"
@@ -271,7 +267,7 @@ def _hardwarecontrol(root, sender, led):
 
         se_off = ET.Element('oneSwitch')
         se_off.set("name", "LED OFF")
-        if newled:
+        if led:
             se_off.text = "Off"
         else:
             se_off.text = "On"
@@ -279,12 +275,11 @@ def _hardwarecontrol(root, sender, led):
 
     else:
         # tag not recognised, do not add anything to sender
-        # return current state of led
-        return led
+        return
 
     # appends the xml data to be sent to the sender deque object
     sender.append(ET.tostring(xmldata))
-    return newled
+    return
 
     
 
