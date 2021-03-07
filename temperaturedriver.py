@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/home/bernard/acenv/bin/python3
 
 
 """temperaturedriver.py
@@ -9,13 +9,15 @@ Initially, this is a simulator, using metoffice data
 
 """
 
-import os, sys, collections, asyncio
+import os, sys, collections, asyncio, time
 
 import urllib.request, json     # required for met office communications
 
 import xml.etree.ElementTree as ET
 
 from datetime import datetime
+
+import redis
 
 # All xml data received on the port from the client should be contained in one of the following tags
 TAGS = (b'getProperties',
@@ -39,29 +41,37 @@ _ELEMENT = 'TEMPERATURE'
 _MET_OFFICE_KEY = ''
 
 
-def driver():
-    "Blocking call"
-
-    # now start eventloop to read and write to stdin, stdout
-    loop = asyncio.get_event_loop()
-
-    connections = _TEMPERATURE(loop)
-
-    while True:
-        try:
-            loop.run_until_complete(connections.handle_data())
-        finally:
-            loop.close()
-
-
 class _TEMPERATURE:
 
-    def __init__(self, loop):
+    conversion_factor = 3.3 / (65535)
+
+    def __init__(self, rconn, loop):
         "Sets the data used by the data handler"
         self.loop = loop
+        self.rconn = rconn
         self.sender = collections.deque(maxlen=100)
         # start with zero centigrade, which should be immediately overwritten
-        self.temperature, self.timestamp = hardwaretemperature("273.15", datetime.utcnow().isoformat(sep='T'))
+        self.temperature = "273.15"
+        self.timestamp = datetime.utcnow().isoformat(sep='T')
+        # request temperature from pico
+        self.rconn.publish('tx_to_pico', 'pico_temperature')
+        # wait a couple of seconds
+        time.sleep(2)
+        # and hopefully get the latest temperature
+        self.temperature, self.timestamp = self.get_temperature()
+
+
+    def get_temperature(self):
+        "Returns the temperature, timestamp. If not found, returns current self.temperature, self.timestamp"
+        reading = self.rconn.get('pico_temperature')
+        if reading is None:
+            return self.temperature, self.timestamp
+        # having read a temperature, delete it. so it is only valid for this timestamp
+        self.rconn.delete('pico_temperature')
+        # The temperature sensor measures the Vbe voltage of a biased bipolar diode, connected to the fifth ADC channel
+        # Typically, Vbe = 0.706V at 27 degrees C, with a slope of -1.721mV (0.001721) per degree. 
+        temperature = 27 - (int(reading)*self.conversion_factor - 0.706)/0.001721 + 273.15 # 273.15 added to convert to Kelvin
+        return str(temperature), datetime.utcnow().isoformat(sep='T')
 
 
     async def handle_data(self):
@@ -75,27 +85,35 @@ class _TEMPERATURE:
                                                        sys.stdout)
         writer = asyncio.StreamWriter(writer_transport, writer_protocol, None, self.loop)
 
-
         await asyncio.gather(self.reader(reader), self.writer(writer), self.update())
 
 
     async def update(self):
         """Gets an updated temperature, and creates a setNumberVector placing it into self.sender for transmission"""
-        # Check every ten minutes
-        while True:            
-            await asyncio.sleep(600)
-            temperature, timestamp = await self.loop.run_in_executor(None, self.setNumberVector)
+        # Check every hour
+        while True:
+            await asyncio.sleep(3595)
+            # request temperature from pico
+            self.rconn.publish('tx_to_pico', 'pico_temperature')
+            # and after publishing the request, hopefully get a reply       
+            await asyncio.sleep(5)
+            temperature, timestamp = self.get_temperature()
             if timestamp == self.timestamp:
-                # no change, continue, and try again in ten minutes
+                # no update
                 continue
-            # a new reading has been obtained
-            self.timestamp = timestamp
             self.temperature = temperature
-            # since a new reading has been obtained, no point in checking every ten minutes
-            # since readings are updated hourly. So add another wait here of thirty minutes
-            await asyncio.sleep(1800)
-            # this gives a total wait of forty minutes, after which the temperature is
-            # checked agin at ten minute intervals
+            self.timestamp = timestamp
+            # create the setNumberVector
+            xmldata = ET.Element('setNumberVector')
+            xmldata.set("device", _DEVICE)
+            xmldata.set("name", _NAME)
+            xmldata.set("timestamp", timestamp)
+            ne = ET.Element('oneNumber')
+            ne.set("name", _ELEMENT)
+            ne.text = temperature
+            xmldata.append(ne)
+            # appends the xml data to be sent to the sender deque object
+            self.sender.append(ET.tostring(xmldata))
 
 
     async def writer(self, writer):
@@ -229,92 +247,20 @@ class _TEMPERATURE:
         return
 
 
-    def setNumberVector(self):
-        """Sets temperature setNumberVector in the sender deque.
-           Returns new temperature, timestamp"""
-        temperature, timestamp = hardwaretemperature(self.temperature, self.timestamp)
-        # create the setNumberVector
-        xmldata = ET.Element('setNumberVector')
-        xmldata.set("device", _DEVICE)
-        xmldata.set("name", _NAME)
-        xmldata.set("timestamp", timestamp)
-        ne = ET.Element('oneNumber')
-        ne.set("name", _ELEMENT)
-        ne.text = temperature
-        xmldata.append(ne)
-
-        # appends the xml data to be sent to the sender deque object
-        self.sender.append(ET.tostring(xmldata))
-        return temperature, timestamp
-
-
-def hardwaretemperature(temperature, timestamp):
-    """temperature is the current temperature, gets a new value from hardware and returns it
-       with an updated timestamp. Both temperature and timestamp are strings
-       If a temperature cannot be found, returns the old temperature and timestamp"""
-    # Eventually this will use hardware, currently just use the met office
-    if not _MET_OFFICE_KEY:
-        return temperature, timestamp
-
-    try:
-
-        # get a list of available timestamps, and choose the latest (last in list)
-        url = f'http://datapoint.metoffice.gov.uk/public/data/val/wxobs/all/json/capabilities?res=hourly&key={_MET_OFFICE_KEY}'
-        with urllib.request.urlopen(url) as response:
-           values = json.loads(response.read())
-
-        # get the last timestemp
-        latest_time = values["Resource"]['TimeSteps']["TS"][-1]
-
-        # remove the TZ info
-        actimestring = latest_time[:-4]
-        if actimestring == timestamp:
-            # no new time temperature is available 
-            return temperature, timestamp
-
-        try:
-            # 3344 = location id for Bingley Samos
-            url = f'http://datapoint.metoffice.gov.uk/public/data/val/wxobs/all/json/3344?res=hourly&time={latest_time}&key={_MET_OFFICE_KEY}'
-            with urllib.request.urlopen(url) as response:
-                values = json.loads(response.read())
-            temperature1 = values['SiteRep']['DV']['Location']['Period']['Rep']['T']
-        except:
-            temperature1 = None
-
-        try:
-            # 99060 = location id for Stonyhurst
-            url = f'http://datapoint.metoffice.gov.uk/public/data/val/wxobs/all/json/99060?res=hourly&time={latest_time}&key={_MET_OFFICE_KEY}'
-            with urllib.request.urlopen(url) as response:
-               values = json.loads(response.read())
-            temperature2 = values['SiteRep']['DV']['Location']['Period']['Rep']['T']
-        except:
-            temperature2 = None
-
-        # temperature at the Astronomy Centre is estimated as the average of these two,
-        # minus a quarter of a degree due to its height. 273.15 is added to convert to Kelvin
-
-        if temperature1 and temperature2:
-            actemp = (float(temperature1) + float(temperature2))/2.0 - 0.25 + 273.15
-            actempstring = "%.2f" % actemp
-        elif temperature1:
-            actemp = float(temperature1) - 0.25 + 273.15
-            actempstring = "%.2f" % actemp
-        elif temperature2:
-            actemp = float(temperature2) - 0.25 + 273.15
-            actempstring = "%.2f" % actemp
-        else:
-            return temperature, timestamp
-
-    except Exception:
-        # some failure occurred getting the temperature
-        return temperature, timestamp
-
-    return actempstring, actimestring
-
-
 
 if __name__=="__main__":
 
-    # start this blocking call
-    driver()
+    # create a redis connection
+    rconn = redis.StrictRedis(host='localhost', port=6379, db=0)
+
+    # start eventloop to read and write to stdin, stdout
+    loop = asyncio.get_event_loop()
+
+    connections = _TEMPERATURE(rconn, loop)
+
+    while True:
+        try:
+            loop.run_until_complete(connections.handle_data())
+        finally:
+            loop.close()
 
