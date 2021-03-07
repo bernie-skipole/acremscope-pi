@@ -34,27 +34,6 @@ _STARTTAGS = tuple(b'<' + tag for tag in TAGS)
 _ENDTAGS = tuple(b'</' + tag + b'>' for tag in TAGS)
 
 
-def driver(rconn, led=False):
-    "Blocking call, led is the initial LED state, True for ON, False for OFF"
-
-    # send the initial state to the pico
-    if led:
-        rconn.publish('tx_to_pico', 'pico_led_On')
-    else:
-        rconn.publish('tx_to_pico', 'pico_led_Off')
-
-    # now start eventloop to read and write to stdin, stdout
-    loop = asyncio.get_event_loop()
-
-    connections = _LED(rconn, loop)
-
-    while True:
-        try:
-            loop.run_until_complete(connections.handle_data())
-        finally:
-            loop.close()
-
-
 class _LED:
 
     def __init__(self, rconn, loop):
@@ -303,6 +282,17 @@ if __name__=="__main__":
     # create a redis connection
     rconn = redis.StrictRedis(host='localhost', port=6379, db=0)
 
-    # start this blocking call, with an initial LED value of False
-    driver(rconn, led=False)
+    # now start eventloop to read and write to stdin, stdout
+    loop = asyncio.get_event_loop()
+
+    connections = _LED(rconn, loop)
+
+    while True:
+        try:
+            loop.run_until_complete(connections.handle_data())
+        finally:
+            loop.close()
+
+
+
 
