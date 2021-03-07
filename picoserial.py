@@ -40,6 +40,11 @@ def receiver(ser, rconn):
             rconn.set('pico_led', 'Off')
         if (returnval[1] == 25) and (returnval[2] == 1):
             rconn.set('pico_led', 'On')
+    if returnval[0] == 5:
+        # Temperature, as a two byte a to d conversion, save to redis as integer
+        value = int.from_bytes( [returnval[1], returnval[2]], 'big')
+        rconn.set('pico_temperature', value)
+       
 
 
 def sender(data, ser, rconn):
@@ -48,6 +53,9 @@ def sender(data, ser, rconn):
         set_led(True, ser, rconn)
     elif data == b'pico_led_Off':
         set_led(False, ser, rconn)
+    elif data == b'pico_temperature':
+        bincode = bytes([5, 4, 0, 255])  # send temperature request to pico
+        ser.write(bincode)
 
 
 def set_led(state, ser, rconn):
@@ -103,6 +111,5 @@ if __name__ == "__main__":
             # obtain message data payload, and send via serial port
             data = message['data']  # data is a binary string
             sender(data, ser, rconn)
-
 
 
