@@ -1,3 +1,4 @@
+#!/home/bernard/acenv/bin/python3
 
 
 """picoserial.py
@@ -5,79 +6,103 @@
 Requires the package pyserial
 """
 
-import os, sys, collections, serial, time, threading
+import os, sys, time
 
 from datetime import datetime
 
-# serial port transmit que
-TX_DATA = collections.deque(maxlen=16)
+import redis, serial
+
+def receiver(ser, rconn):
+    "Serial port receiver - sets received values in redis"
+    returnval = ser.read(4) # only four should arrive
+    if not returnval:
+        return
+    # discard received data until synchronised, at which point data
+    # should come as four bytes at a time
+    if len(returnval) != 4:
+        return
+    if returnval[3] != 255:
+        # out of sync, try receiving a single byte
+        # until a timeout or 255 is received
+        # to attempt to get into sync
+        while True:
+            getbyte = ser.read(1)
+            if getbyte is None:
+                # timed out
+                return
+            if getbyte == 255:
+                # in sync
+                return
+    # parse the data
+    if returnval[0] == 1:
+        # LED code
+        if (returnval[1] == 25) and (returnval[2] == 0):
+            rconn.set('pico_led', 'Off')
+        if (returnval[1] == 25) and (returnval[2] == 1):
+            rconn.set('pico_led', 'On')
 
 
-# state variables
-
-# LED is True, or False, for On or Off
-LED = False
-
-
-def sender(ser):
-    "Serial port sender - send anything in the TX_DATA deque"
-    global TX_DATA
-    while True:
-        if not TX_DATA:
-            time.sleep(0.1)
-            continue
-        # get code to send from the TX_DATA deque, and add byte 255 as a terminator
-        data = list(TX_DATA.popleft()) + [255]
-        bincode = bytes(data)
-        ser.write(bincode)
+def sender(data, ser, rconn):
+    "Sends data via the serial port"
+    if data == b'pico_led_On':
+        set_led(True, ser, rconn)
+    elif data == b'pico_led_Off':
+        set_led(False, ser, rconn)
 
 
-def receiver(ser):
-    "Serial port receiver - sets global state variables"
-    global LED
-    while True:
-        returnval = ser.read(10) # only four should arrive
-        if not returnval:
-            continue
-        # discard received data until synchronised, at which points data
-        # should come as four bytes at a time
-        if len(returnval) != 4:
-            continue
-        if returnval[3] != 255:
-            continue
-        # parse the data
-        if returnval[0] == 1:
-            # LED code
-            if (returnval[1] == 25) and (returnval[2] == 0):
-                LED = False
-            if (returnval[1] == 25) and (returnval[2] == 1):
-                LED = True
-
-
-
-# start threads controlling the serial port
-ser = serial.Serial('/dev/serial0', 115200, timeout=0.2)
-worker1 = threading.Thread(target=sender, args=(ser,))
-worker1.start()
-worker2 = threading.Thread(target=receiver, args=(ser,))
-worker2.start()
-
-
-def set_led(state):
+def set_led(state, ser, rconn):
     "if state is True, turn on the LED, False, turn it off"
-    global LED
     # code:  1
     # pin:  25
     # state: 1 or 0
     if state:
-        TX_DATA.append((1, 25, 1))
-        LED = True
+        bincode = bytes([1, 25, 1, 255])  # send bytes to pico
+        ser.write(bincode)
+        rconn.set('pico_led', 'On')  # save value in redis
     else:
-        TX_DATA.append((1, 25, 0))
-        LED = False
+        bincode = bytes([1, 25, 0, 255])  # send bytes to pico
+        ser.write(bincode)
+        rconn.set('pico_led', 'Off')
+    # If another process wants the LED value, it uses redis get('pico_led')
 
-def get_led():
-    "Return the value of the LED, True or False"
-    global LED
-    return LED
+
+if __name__ == "__main__":
+
+    # create a redis connection
+    rconn = redis.StrictRedis(host='localhost', port=6379, db=0)
+
+    ps = rconn.pubsub(ignore_subscribe_messages=True)
+    ps.psubscribe('tx_to_pico')
+
+    # open the serial port
+    ser = serial.Serial('/dev/serial0', 115200, timeout=0.2)
+
+    # If another process wants to set the LED value, it uses redis to publish on channel 'tx_to_pico'
+    # rconn.publish('tx_to_pico', 'pico_led_On')
+
+    # two seconds or so of flashing the led to synchronize data packets
+    for count in range(0,5):
+        time.sleep(0.1)
+        sender(b'pico_led_On', ser, rconn)
+        time.sleep(0.1)
+        receiver(ser, rconn)
+        time.sleep(0.1)
+        sender(b'pico_led_Off', ser, rconn)
+        time.sleep(0.1)
+        receiver(ser, rconn)
+
+
+    # blocks and communicates between redis and the serial port
+    while True:
+        time.sleep(0.1)
+        # check if anything received, and place values in redis
+        receiver(ser, rconn)
+        # see if anything published by redis to send
+        message = ps.get_message()
+        if message:
+            # obtain message data payload, and send via serial port
+            data = message['data']  # data is a binary string
+            sender(data, ser, rconn)
+
+
 

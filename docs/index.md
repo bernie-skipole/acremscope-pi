@@ -44,7 +44,9 @@ install python dependencies
 
 pip install indiredis
 
-this also pulls in packages skipole, waitress, redis, paho-mqtt, indi-mr.
+this also pulls in packages skipole, waitress, redis, paho-mqtt, indi-mr
+
+pip install pyserial
 
 Create a folder ~/indiblobs
 
@@ -57,6 +59,8 @@ remoteaccess.service
 remscopedrivers.service
 
 indiclient.service
+
+picoserial.service
 
 For example
 

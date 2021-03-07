@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/home/bernard/acenv/bin/python3
 
 
 """leddriver.py
@@ -17,7 +17,7 @@ import xml.etree.ElementTree as ET
 
 from datetime import datetime
 
-import picoserial
+import redis
 
 # All xml data received on the port from the client should be contained in one of the following tags
 TAGS = (b'getProperties',
@@ -34,13 +34,19 @@ _STARTTAGS = tuple(b'<' + tag for tag in TAGS)
 _ENDTAGS = tuple(b'</' + tag + b'>' for tag in TAGS)
 
 
-def driver(led=False):
+def driver(rconn, led=False):
     "Blocking call, led is the initial LED state, True for ON, False for OFF"
+
+    # send the initial state to the pico
+    if led:
+        rconn.publish('tx_to_pico', 'pico_led_On')
+    else:
+        rconn.publish('tx_to_pico', 'pico_led_Off')
 
     # now start eventloop to read and write to stdin, stdout
     loop = asyncio.get_event_loop()
 
-    connections = _LED(led, loop)
+    connections = _LED(rconn, loop)
 
     while True:
         try:
@@ -51,13 +57,20 @@ def driver(led=False):
 
 class _LED:
 
-    def __init__(self, led, loop):
+    def __init__(self, rconn, loop):
         "Sets the data used by the data handler"
         self.loop = loop
         self.sender = collections.deque(maxlen=100)
-        # send the initial state to the pico
-        picoserial.set_led(led)
+        self.rconn = rconn
 
+    def get_led_state(self):
+        "Returns True or False"
+        # do an hardware check of the led status
+        pico_led = self.rconn.get('pico_led')
+        if pico_led == b'On':
+            return True
+        else:
+            return False
 
     async def handle_data(self):
         """handle data via stdin and stdout"""
@@ -120,7 +133,7 @@ class _LED:
                         messagetagnumber = None
                         continue
                     ########### RUN HARDWARECONTROL ###############
-                    _hardwarecontrol(root, self.sender)
+                    self.hardwarecontrol(root)
 
                     # and start again, waiting for a new message
                     message = b''
@@ -141,150 +154,155 @@ class _LED:
                     messagetagnumber = None
                     continue
                 ########### RUN HARDWARECONTROL ###############
-                _hardwarecontrol(root, self.sender)
+                self.hardwarecontrol(root)
 
                 # and start again, waiting for a new message
                 message = b''
                 messagetagnumber = None
 
 
+    def hardwarecontrol(self, root):
+        """Handles the received XML and, if data is to be sent,
+           sets xml in the sender deque. Sets led status via redis"""
 
-def _hardwarecontrol(root, sender):
-    """Handles the received XML and, if data is to be sent,
-       sets xml in the sender deque. Sets led status via picoserial"""
+        # this timestamp is the time at which the data is received
+        # timestamp = datetime.utcnow().isoformat(sep='T')
 
-    # this timestamp is the time at which the data is received
-    # timestamp = datetime.utcnow().isoformat(sep='T')
+        if root.tag == "getProperties":
 
-    if root.tag == "getProperties":
+            # expecting something like
+            # <getProperties version="1.7" device="Rempi01 LED" name="LED" />
 
-        # expecting something like
-        # <getProperties version="1.7" device="Rempi01 LED" name="LED" />
+            version = root.get("version")
+            if version != "1.7":
+                return
 
-        version = root.get("version")
-        if version != "1.7":
-            return
+            device = root.get("device")
+            # device must be None (for all devices), or 'Rempi01 LED' which is this device
+            if (not (device is None)) and (device != 'Rempi01 LED'):
+                # not a recognised device
+                return
 
-        device = root.get("device")
-        # device must be None (for all devices), or 'Rempi01 LED' which is this device
-        if (not (device is None)) and (device != 'Rempi01 LED'):
-            # not a recognised device
-            return
+            name = root.get("name")
+            # name must be None (for all properties), or 'LED' which is the only property
+            # of this device
+            if (not (name is None)) and (name != 'LED'):
+                # not a recognised property
+                return
 
-        name = root.get("name")
-        # name must be None (for all properties), or 'LED' which is the only property
-        # of this device
-        if (not (name is None)) and (name != 'LED'):
-            # not a recognised property
-            return
+            # do an hardware check of the led status
+            led = self.get_led_state()
 
-        # do an hardware check of the led status
-        led = picoserial.get_led()
+            # create the responce
+            xmldata = ET.Element('defSwitchVector')
+            xmldata.set("device", 'Rempi01 LED')
+            xmldata.set("name", 'LED')
+            xmldata.set("label", "LED")
+            xmldata.set("group", "Status")
+            xmldata.set("state", "Ok")
+            xmldata.set("perm", "rw")
+            xmldata.set("rule", "OneOfMany")
 
-        # create the responce
-        xmldata = ET.Element('defSwitchVector')
-        xmldata.set("device", 'Rempi01 LED')
-        xmldata.set("name", 'LED')
-        xmldata.set("label", "LED")
-        xmldata.set("group", "Status")
-        xmldata.set("state", "Ok")
-        xmldata.set("perm", "rw")
-        xmldata.set("rule", "OneOfMany")
+            se_on = ET.Element('defSwitch')
+            se_on.set("name", "LED ON")
+            if led:
+                se_on.text = "On"
+            else:
+                se_on.text = "Off"
+            xmldata.append(se_on)
 
-        se_on = ET.Element('defSwitch')
-        se_on.set("name", "LED ON")
-        if led:
-            se_on.text = "On"
+            se_off = ET.Element('defSwitch')
+            se_off.set("name", "LED OFF")
+            if led:
+                se_off.text = "Off"
+            else:
+                se_off.text = "On"
+            xmldata.append(se_off)
+
+        elif root.tag == "newSwitchVector":
+
+            # expecting something like
+            # <newSwitchVector device="Rempi01 LED" name="LED">
+            #   <oneSwitch name="LED ON">On</oneSwitch>
+            # </newSwitchVector>
+
+            device = root.get("device")
+            # device must be  'Rempi01 LED' which is this device
+            if device != 'Rempi01 LED':
+                # not a recognised device
+                return
+
+            name = root.get("name")
+            # name must be 'LED' which is the only property
+            # of this device
+            if name != 'LED':
+                # not a recognised property
+                return
+
+            # get current led status
+            led = self.get_led_state()
+
+            switchlist = root.findall("oneSwitch")
+            for setting in switchlist:
+                # property name
+                pn = setting.get("name")
+                # get switch On or Off, remove newlines
+                content = setting.text.strip()
+                if (pn == "LED ON") and (content == "On"):
+                    led = True
+                if (pn == "LED ON") and (content == "Off"):
+                    led = False
+                if (pn == "LED OFF") and (content == "On"):
+                    led = False
+                if (pn == "LED OFF") and (content == "Off"):
+                    led = True
+
+            # send this led state to the pico
+            if led:
+                self.rconn.publish('tx_to_pico', 'pico_led_On')
+            else:
+                self.rconn.publish('tx_to_pico', 'pico_led_Off')
+
+            # send setSwitchVector vector
+            # create the response
+            xmldata = ET.Element('setSwitchVector')
+            xmldata.set("device", 'Rempi01 LED')
+            xmldata.set("name", 'LED')
+            xmldata.set("state", "Ok")
+
+            # with its two switch states
+
+            se_on = ET.Element('oneSwitch')
+            se_on.set("name", "LED ON")
+            if led:
+                se_on.text = "On"
+            else:
+                se_on.text = "Off"
+            xmldata.append(se_on)
+
+            se_off = ET.Element('oneSwitch')
+            se_off.set("name", "LED OFF")
+            if led:
+                se_off.text = "Off"
+            else:
+                se_off.text = "On"
+            xmldata.append(se_off)
+
         else:
-            se_on.text = "Off"
-        xmldata.append(se_on)
-
-        se_off = ET.Element('defSwitch')
-        se_off.set("name", "LED OFF")
-        if led:
-            se_off.text = "Off"
-        else:
-            se_off.text = "On"
-        xmldata.append(se_off)
-
-    elif root.tag == "newSwitchVector":
-
-        # expecting something like
-        # <newSwitchVector device="Rempi01 LED" name="LED">
-        #   <oneSwitch name="LED ON">On</oneSwitch>
-        # </newSwitchVector>
-
-        device = root.get("device")
-        # device must be  'Rempi01 LED' which is this device
-        if device != 'Rempi01 LED':
-            # not a recognised device
+            # tag not recognised, do not add anything to sender
             return
 
-        name = root.get("name")
-        # name must be 'LED' which is the only property
-        # of this device
-        if name != 'LED':
-            # not a recognised property
-            return
-
-        # get current led status
-        led = picoserial.get_led()
-
-        switchlist = root.findall("oneSwitch")
-        for setting in switchlist:
-            # property name
-            pn = setting.get("name")
-            # get switch On or Off, remove newlines
-            content = setting.text.strip()
-            if (pn == "LED ON") and (content == "On"):
-                led = True
-            if (pn == "LED ON") and (content == "Off"):
-                led = False
-            if (pn == "LED OFF") and (content == "On"):
-                led = False
-            if (pn == "LED OFF") and (content == "Off"):
-                led = True
-
-        # send this led state to the pico
-        picoserial.set_led(led)
-
-        # send setSwitchVector vector
-        # create the response
-        xmldata = ET.Element('setSwitchVector')
-        xmldata.set("device", 'Rempi01 LED')
-        xmldata.set("name", 'LED')
-        xmldata.set("state", "Ok")
-
-        # with its two switch states
-
-        se_on = ET.Element('oneSwitch')
-        se_on.set("name", "LED ON")
-        if led:
-            se_on.text = "On"
-        else:
-            se_on.text = "Off"
-        xmldata.append(se_on)
-
-        se_off = ET.Element('oneSwitch')
-        se_off.set("name", "LED OFF")
-        if led:
-            se_off.text = "Off"
-        else:
-            se_off.text = "On"
-        xmldata.append(se_off)
-
-    else:
-        # tag not recognised, do not add anything to sender
+        # appends the xml data to be sent to the sender deque object
+        self.sender.append(ET.tostring(xmldata))
         return
-
-    # appends the xml data to be sent to the sender deque object
-    sender.append(ET.tostring(xmldata))
-    return
 
     
 
 if __name__=="__main__":
 
+    # create a redis connection
+    rconn = redis.StrictRedis(host='localhost', port=6379, db=0)
+
     # start this blocking call, with an initial LED value of False
-    driver(led=False)
+    driver(rconn, led=False)
 
