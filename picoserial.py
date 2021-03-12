@@ -40,7 +40,12 @@ def receiver(ser, rconn):
             rconn.set('pico_led', 'Off')
         if (returnval[1] == 25) and (returnval[2] == 1):
             rconn.set('pico_led', 'On')
-    if returnval[0] == 5:
+    elif (returnval[0] == 3) and (returnval[1] == 0):
+        # Echo monitor code
+        # value as a one byte number, save to redis as integer
+        value = int.from_bytes( [returnval[2]], 'big')
+        rconn.set('pico_monitor', value)
+    elif returnval[0] == 5:
         # Temperature, as a two byte a to d conversion, save to redis as integer
         value = int.from_bytes( [returnval[1], returnval[2]], 'big')
         rconn.set('pico_temperature', value)
@@ -53,6 +58,12 @@ def sender(data, ser, rconn):
         set_led(True, ser, rconn)
     elif data == b'pico_led_Off':
         set_led(False, ser, rconn)
+    elif data.startswith(b'pico_monitor_'):
+        # monitor data is of the form pico_monitor_0, pico_monitor_1 etc..
+        count = int(data[13:])
+        # count is the number passed in the data bytes string
+        bincode = bytes([3, 0, count, 255])  # send monitor request to pico
+        ser.write(bincode)
     elif data == b'pico_temperature':
         bincode = bytes([5, 4, 0, 255])  # send temperature request to pico
         ser.write(bincode)

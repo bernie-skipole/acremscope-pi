@@ -4,6 +4,7 @@
 """picodriver.py
 
 Gets and sets LED on the pico
+Sends/receives monitoring count to the pico
 Receives temperature values from the pico
 
 device is 'Rempico01'
@@ -11,6 +12,8 @@ device is 'Rempico01'
 property name  is 'LED'
 element names are 'LED ON' and 'LED OFF'
 
+property name is 'MONITOR'
+element name is 'PICOALIVE'
 
 property name is 'ATMOSPHERE'
 element name is 'TEMPERATURE'
@@ -57,6 +60,8 @@ class _PICO:
         time.sleep(2)
         # and hopefully get the latest temperature
         self.temperature, self.timestamp = self.get_temperature()
+        # count is a number that will be sent to the pico at 15 second intervals, and is expected to be returned
+        self.count = 0
 
     def get_temperature(self):
         "Returns the temperature, timestamp. If not found, returns current self.temperature, self.timestamp"
@@ -81,6 +86,17 @@ class _PICO:
             return False
 
 
+    def check_monitor_echo(self):
+        "Returns True if count has been echoed back from the pico, False otherwise"
+        monitor_value = self.rconn.get('pico_monitor')
+        if monitor_value is None:
+            return False
+        if self.count == int(monitor_value):
+            return True
+        else:
+            return False
+
+
     async def handle_data(self):
         """handle data via stdin and stdout"""
         reader = asyncio.StreamReader(loop=self.loop)
@@ -94,13 +110,45 @@ class _PICO:
 
 
     async def update(self):
-        """Gets an updated temperature, and creates a setNumberVector placing it into self.sender for transmission"""
-        # Check every hour
+        """15 second pico monitor and hourly temperature"""
+
         while True:
-            await asyncio.sleep(3595)
+            # every 15 seconds, request a monitor
+            for count in range(0, 239):
+                # 239 counts of 15 seconds is 3585, so fifteen seconds short of an hour
+                await asyncio.sleep(10)          
+                # request monitor echo
+                self.count = count
+                self.rconn.publish('tx_to_pico', f'pico_monitor_{count}')
+                # wait another 5 seconds, giving the pico time to reply
+                await asyncio.sleep(5)
+                # send a setLightVector
+                # create the setLightVector
+                xmldata = ET.Element('setLightVector')
+                xmldata.set("device", 'Rempico01')
+                xmldata.set("name", 'MONITOR')
+                # note - limit timestamp characters to :21 to avoid long fractions of a second 
+                xmldata.set("timestamp", datetime.utcnow().isoformat(sep='T')[:21])
+                le = ET.Element('oneLight')
+                le.set("name", 'PICOALIVE')
+                if self.check_monitor_echo():
+                    xmldata.set("state", "Ok")
+                    le.text = "Ok"
+                else:
+                    xmldata.set("state", "Alert")
+                    le.text = "Alert"
+                xmldata.append(le)
+                # appends the xml data to be sent to the sender deque object
+                self.sender.append(ET.tostring(xmldata))
+                
+            # Request temperature  every hour
+
+            # wait another 10 seconds
+            await asyncio.sleep(10)
             # request temperature from pico
             self.rconn.publish('tx_to_pico', 'pico_temperature')
-            # and after publishing the request, hopefully get a reply       
+            # and after publishing the request, hopefully get a reply 
+            # wait another five seconds to give a total time cycle of one hour      
             await asyncio.sleep(5)
             temperature, timestamp = self.get_temperature()
             if timestamp == self.timestamp:
@@ -230,14 +278,18 @@ class _PICO:
                 # send def for all devices/properties 
                 self.defswitchvector(root)   # the led switch
                 self.defnumbervector(root)   # the temperature value
+                self.deflightvector(root)    # the monitor value
             elif name is None:
                 # This device, all properties
                 self.defswitchvector(root)   # the led switch
                 self.defnumbervector(root)   # the temperature value
+                self.deflightvector(root)    # the monitor value
             elif name is 'LED':
                 self.defswitchvector(root)   # the led switch
             elif name is 'ATMOSPHERE':
                 self.defnumbervector(root)   # the temperature value
+            elif name is 'MONITOR':
+                self.deflightvector(root)    # the monitor value
 
         elif root.tag == "newSwitchVector":
 
@@ -381,6 +433,32 @@ class _PICO:
         # appends the xml data to be sent to the sender deque object
         self.sender.append(ET.tostring(xmldata))
         return
+
+
+    def deflightvector(self, root):
+        """Responds to a getProperties, for the 'MONITOR' property, and sets defLightVector in the sender deque.
+           Returns None"""
+
+        # create the defLightVector
+        xmldata = ET.Element('defLightVector')
+        xmldata.set("device", 'Rempico01')
+        xmldata.set("name", 'MONITOR')
+        xmldata.set("label", "REMPICO01 Status")
+        xmldata.set("group", "Status")
+        le = ET.Element('defLight')
+        le.set("name", 'PICOALIVE')
+        le.set("label", 'Monitor echo from pico 01')
+        if self.check_monitor_echo():
+            xmldata.set("state", "Ok")
+            le.text = "Ok"
+        else:
+            xmldata.set("state", "Alert")
+            le.text = "Alert"
+        xmldata.append(le)
+
+        # appends the xml data to be sent to the sender deque object
+        self.sender.append(ET.tostring(xmldata))
+
 
     
 
