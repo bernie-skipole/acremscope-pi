@@ -62,6 +62,8 @@ class _PICO:
         self.temperature, self.timestamp = self.get_temperature()
         # count is a number that will be sent to the pico at 15 second intervals, and is expected to be returned
         self.count = 0
+        # monitor is True if receiving echos from the pico, False otherwise
+        self.monitor = False
 
     def get_temperature(self):
         "Returns the temperature, timestamp. If not found, returns current self.temperature, self.timestamp"
@@ -122,7 +124,12 @@ class _PICO:
                 self.rconn.publish('tx_to_pico', f'pico_monitor_{count}')
                 # wait another 5 seconds, giving the pico time to reply
                 await asyncio.sleep(5)
-                # send a setLightVector
+                # check for a reply
+                echo = self.check_monitor_echo
+                if echo and self.monitor:
+                    # pico is echoing, no change from the current state, continue to next count
+                    continue
+                # The state has changed, so send a setLightVector
                 # create the setLightVector
                 xmldata = ET.Element('setLightVector')
                 xmldata.set("device", 'Rempico01')
@@ -131,12 +138,14 @@ class _PICO:
                 xmldata.set("timestamp", datetime.utcnow().isoformat(sep='T')[:21])
                 le = ET.Element('oneLight')
                 le.set("name", 'PICOALIVE')
-                if self.check_monitor_echo():
+                if echo:
                     xmldata.set("state", "Ok")
                     le.text = "Ok"
+                    self.monitor = True
                 else:
                     xmldata.set("state", "Alert")
                     le.text = "Alert"
+                    self.monitor = False
                 xmldata.append(le)
                 # appends the xml data to be sent to the sender deque object
                 self.sender.append(ET.tostring(xmldata))
