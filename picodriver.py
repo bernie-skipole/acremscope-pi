@@ -125,11 +125,11 @@ class _PICO:
                 # wait another 5 seconds, giving the pico time to reply
                 await asyncio.sleep(5)
                 # check for a reply
-                echo = self.check_monitor_echo
+                echo = self.check_monitor_echo()
                 if echo and self.monitor:
                     # pico is echoing, no change from the current state, continue to next count
                     continue
-                # The state has changed, so send a setLightVector
+                # No echo, or the state has changed, so send a setLightVector
                 # create the setLightVector
                 xmldata = ET.Element('setLightVector')
                 xmldata.set("device", 'Rempico01')
@@ -340,6 +340,12 @@ class _PICO:
         xmldata.set("perm", "rw")
         xmldata.set("rule", "OneOfMany")
 
+        if self.monitor:
+            xmldata.set("state", "Ok")
+        else:
+            xmldata.set("state", "Alert")
+            xmldata.set("message", "State Unknown - pico monitor indicates fault")
+
         se_on = ET.Element('defSwitch')
         se_on.set("name", "LED ON")
         if led:
@@ -419,7 +425,13 @@ class _PICO:
         xmldata = ET.Element('setSwitchVector')
         xmldata.set("device", 'Rempico01')
         xmldata.set("name", 'LED')
-        xmldata.set("state", "Ok")
+ 
+        if self.monitor:
+            xmldata.set("state", "Ok")
+            xmldata.set("message", "Awaiting instruction")
+        else:
+            xmldata.set("state", "Alert")
+            xmldata.set("message", "State Unknown - pico monitor indicates fault")
 
         # with its two switch states
 
