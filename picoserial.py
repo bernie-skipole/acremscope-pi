@@ -35,7 +35,13 @@ def receiver(ser, rconn):
                 return
     # parse the data
     if returnval[0] == 1:
-        # LED code
+        # LED code, received after sending an led set request
+        if (returnval[1] == 25) and (returnval[2] == 0):
+            rconn.set('pico_led', 'Off')
+        if (returnval[1] == 25) and (returnval[2] == 1):
+            rconn.set('pico_led', 'On')
+    if returnval[0] == 2:
+        # LED code, received after sending an led get state request
         if (returnval[1] == 25) and (returnval[2] == 0):
             rconn.set('pico_led', 'Off')
         if (returnval[1] == 25) and (returnval[2] == 1):
@@ -55,9 +61,15 @@ def receiver(ser, rconn):
 def sender(data, ser, rconn):
     "Sends data via the serial port"
     if data == b'pico_led_On':
+        # turns on led
         set_led(True, ser, rconn)
     elif data == b'pico_led_Off':
+        # turns off led
         set_led(False, ser, rconn)
+    elif data == b'pico_led':
+        # requests led status
+        bincode = bytes([2, 25, 0, 255])
+        ser.write(bincode)
     elif data.startswith(b'pico_monitor_'):
         # monitor data is of the form pico_monitor_0, pico_monitor_1 etc..
         count = int(data[13:])

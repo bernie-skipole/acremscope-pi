@@ -129,7 +129,9 @@ class _PICO:
                 if echo and self.monitor:
                     # pico is echoing, no change from the current state, continue to next count
                     continue
-                # No echo, or the state has changed, so send a setLightVector
+                # No echo, or the state has changed and echo has just started
+                # so send a setLightVector for the monitor alert
+                # and update led status which will also show an alert
                 # create the setLightVector
                 xmldata = ET.Element('setLightVector')
                 xmldata.set("device", 'Rempico01')
@@ -149,6 +151,13 @@ class _PICO:
                 xmldata.append(le)
                 # appends the xml data to be sent to the sender deque object
                 self.sender.append(ET.tostring(xmldata))
+                if echo:
+                    # if echoing, as it has just started again, request led status from pico
+                    self.rconn.publish('tx_to_pico', 'pico_led')
+                # wait another 5 seconds, giving the pico time to reply
+                await asyncio.sleep(5)
+                # and update the led status by sending a setSwitchVector
+                self.setswitchvector()
                 
             # Request temperature  every hour
 
@@ -217,7 +226,6 @@ class _PICO:
                 # either further children of this tag are coming, or maybe its a single tag ending in "/>"
                 if message.endswith(b'/>'):
                     # the message is complete, handle message here
-                    # Run 'fromindi.receive_from_indiserver' in the default loop's executor:
                     try:
                         root = ET.fromstring(message.decode("utf-8"))
                     except Exception:
@@ -238,7 +246,6 @@ class _PICO:
             message += data
             if message.endswith(_ENDTAGS[messagetagnumber]):
                 # the message is complete, handle message here
-                # Run 'fromindi.receive_from_indiserver' in the default loop's executor:
                 try:
                     root = ET.fromstring(message.decode("utf-8"))
                 except Exception:
@@ -421,6 +428,18 @@ class _PICO:
             self.rconn.publish('tx_to_pico', 'pico_led_Off')
 
         # send setSwitchVector vector
+        self.setswitchvector(led)
+        return
+
+
+
+    def setswitchvector(self, led=None):
+        "Reads current led state (if led not given), and sends a setSwitchVector"
+        # get current led status
+        if led is None:
+            led = self.get_led_state()
+
+        # send setSwitchVector vector
         # create the response
         xmldata = ET.Element('setSwitchVector')
         xmldata.set("device", 'Rempico01')
@@ -454,6 +473,7 @@ class _PICO:
         # appends the xml data to be sent to the sender deque object
         self.sender.append(ET.tostring(xmldata))
         return
+
 
 
     def deflightvector(self, root):
