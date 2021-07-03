@@ -42,61 +42,47 @@ _STARTTAGS = tuple(b'<' + tag for tag in TAGS)
 _ENDTAGS = tuple(b'</' + tag + b'>' for tag in TAGS)
 
 
-class _PICO:
+_DEVICE = 'Rempico01'
 
-    conversion_factor = 3.3 / (65535)
 
-    def __init__(self, rconn, loop):
+def driver():
+    "Blocking call"
+
+    # create a redis connection
+    rconn = redis.StrictRedis(host='localhost', port=6379, db=0)
+
+    # create classes which handles the hardware
+    led = _LED(rconn)
+    temperature = _TEMPERATURE(rconn)
+    monitor = _MONITOR(rconn)
+
+    # now start eventloop to read and write to stdin, stdout
+    loop = asyncio.get_event_loop()
+
+    connections = _Driver(loop, led, temperature, monitor)
+
+    while True:
+        try:
+            loop.run_until_complete(connections.handle_data())
+        finally:
+            loop.close()
+
+
+
+class _Driver:
+
+    def __init__(self, loop, led, temperature, monitor):
         "Sets the data used by the data handler"
         self.loop = loop
         self.sender = collections.deque(maxlen=100)
-        self.rconn = rconn
-        # start with zero centigrade, which should be immediately overwritten
-        self.temperature = "273.15"
-        self.timestamp = datetime.utcnow().isoformat(sep='T')
-        # request temperature from pico
-        self.rconn.publish('tx_to_pico', 'pico_temperature')
-        # wait a couple of seconds
+        self.led = led
+        self.temperature = temperature
+        self._timestamp = datetime.utcnow().isoformat(sep='T')
+        self.monitor = monitor
+        self._monitor_status = False
+        # wait a couple of seconds, for hardware to be updated
         time.sleep(2)
-        # and hopefully get the latest temperature
-        self.temperature, self.timestamp = self.get_temperature()
-        # count is a number that will be sent to the pico at 15 second intervals, and is expected to be returned
-        self.count = 0
-        # monitor is True if receiving echos from the pico, False otherwise
-        self.monitor = False
 
-    def get_temperature(self):
-        "Returns the temperature, timestamp. If not found, returns current self.temperature, self.timestamp"
-        reading = self.rconn.get('pico_temperature')
-        if reading is None:
-            return self.temperature, self.timestamp
-        # having read a temperature, delete it. so it is only valid for this timestamp
-        self.rconn.delete('pico_temperature')
-        # The temperature sensor measures the Vbe voltage of a biased bipolar diode, connected to the fifth ADC channel
-        # Typically, Vbe = 0.706V at 27 degrees C, with a slope of -1.721mV (0.001721) per degree. 
-        temperature = 27 - (int(reading)*self.conversion_factor - 0.706)/0.001721 + 273.15 # 273.15 added to convert to Kelvin
-        return str(temperature), datetime.utcnow().isoformat(sep='T')
-
-
-    def get_led_state(self):
-        "Returns True or False"
-        # do an hardware check of the led status
-        pico_led = self.rconn.get('pico_led')
-        if pico_led == b'On':
-            return True
-        else:
-            return False
-
-
-    def check_monitor_echo(self):
-        "Returns True if count has been echoed back from the pico, False otherwise"
-        monitor_value = self.rconn.get('pico_monitor')
-        if monitor_value is None:
-            return False
-        if self.count == int(monitor_value):
-            return True
-        else:
-            return False
 
 
     async def handle_data(self):
@@ -116,25 +102,25 @@ class _PICO:
 
         while True:
             # every 15 seconds, request a monitor
-            for count in range(0, 239):
-                # 239 counts of 15 seconds is 3585, so fifteen seconds short of an hour
+            for period in range(0, 239):
+                # 239 periods of 15 seconds is 3585, so fifteen seconds short of an hour
                 await asyncio.sleep(10)          
                 # request monitor echo
-                self.count = count
-                self.rconn.publish('tx_to_pico', f'pico_monitor_{count}')
+                self.monitor.update()
                 # wait another 5 seconds, giving the pico time to reply
                 await asyncio.sleep(5)
                 # check for a reply
-                echo = self.check_monitor_echo()
-                if echo and self.monitor:
-                    # pico is echoing, no change from the current state, continue to next count
+                echo = self.monitor.status
+                if echo and self._monitor_status:
+                    # pico is echoing, no change from the current state, continue to next period
                     continue
+                self._monitor_status = echo
                 # No echo, or the state has changed and echo has just started
                 # so send a setLightVector for the monitor alert
                 # and update led status which will also show an alert
                 # create the setLightVector
                 xmldata = ET.Element('setLightVector')
-                xmldata.set("device", 'Rempico01')
+                xmldata.set("device", _DEVICE)
                 xmldata.set("name", 'MONITOR')
                 # note - limit timestamp characters to :21 to avoid long fractions of a second 
                 xmldata.set("timestamp", datetime.utcnow().isoformat(sep='T')[:21])
@@ -143,17 +129,15 @@ class _PICO:
                 if echo:
                     xmldata.set("state", "Ok")
                     le.text = "Ok"
-                    self.monitor = True
                 else:
                     xmldata.set("state", "Alert")
                     le.text = "Alert"
-                    self.monitor = False
                 xmldata.append(le)
                 # appends the xml data to be sent to the sender deque object
                 self.sender.append(ET.tostring(xmldata))
                 if echo:
                     # if echoing, as it has just started again, request led status from pico
-                    self.rconn.publish('tx_to_pico', 'pico_led')
+                    self.led.update()
                 # wait another 5 seconds, giving the pico time to reply
                 await asyncio.sleep(5)
                 # and update the led status by sending a setSwitchVector
@@ -164,19 +148,18 @@ class _PICO:
             # wait another 10 seconds
             await asyncio.sleep(10)
             # request temperature from pico
-            self.rconn.publish('tx_to_pico', 'pico_temperature')
+            self.temperature.update()
             # and after publishing the request, hopefully get a reply 
             # wait another five seconds to give a total time cycle of one hour      
             await asyncio.sleep(5)
-            temperature, timestamp = self.get_temperature()
-            if timestamp == self.timestamp:
+            temperature, timestamp = self.temperature.status
+            if timestamp == self._timestamp:
                 # no update
                 continue
-            self.temperature = temperature
-            self.timestamp = timestamp
+            self._timestamp = timestamp
             # create the setNumberVector
             xmldata = ET.Element('setNumberVector')
-            xmldata.set("device", 'Rempico01')
+            xmldata.set("device", _DEVICE)
             xmldata.set("name", 'ATMOSPHERE')
             # note - limit timestamp characters to :21 to avoid long fractions of a second 
             xmldata.set("timestamp", timestamp[:21])
@@ -279,7 +262,7 @@ class _PICO:
 
             device = root.get("device")
             # device must be None (for all devices), or 'Rempico01' which is this device
-            if (not (device is None)) and (device != 'Rempico01'):
+            if (not (device is None)) and (device != _DEVICE):
                 # not a recognised device
                 return
 
@@ -316,7 +299,7 @@ class _PICO:
 
             device = root.get("device")
             # device must be  'Rempico01' which is this device
-            if device != 'Rempico01':
+            if device != _DEVICE:
                 # not a recognised device
                 return
 
@@ -335,11 +318,11 @@ class _PICO:
            Returns None"""
 
         # do an hardware check of the led status
-        led = self.get_led_state()
+        led = self.led.status
 
         # create the responce
         xmldata = ET.Element('defSwitchVector')
-        xmldata.set("device", 'Rempico01')
+        xmldata.set("device", _DEVICE)
         xmldata.set("name", 'LED')
         xmldata.set("label", "LED")
         xmldata.set("group", "LED")
@@ -377,15 +360,18 @@ class _PICO:
         """Responds to a getProperties, for the 'ATMOSPHERE' property, and sets defNumberVector in the sender deque.
            Returns None"""
 
+        temperature, timestamp = self.temperature.status
+        self._timestamp = timestamp
+
         # create the responce
         xmldata = ET.Element('defNumberVector')
-        xmldata.set("device", 'Rempico01')
+        xmldata.set("device", _DEVICE)
         xmldata.set("name", 'ATMOSPHERE')
         xmldata.set("label", "Temperature (Kelvin)")
         xmldata.set("group", "Temperature")
         xmldata.set("state", "Ok")
         xmldata.set("perm", "ro")
-        xmldata.set("timestamp", self.timestamp[:21])
+        xmldata.set("timestamp", timestamp[:21])
 
         ne = ET.Element('defNumber')
         ne.set("name", 'TEMPERATURE')
@@ -393,7 +379,7 @@ class _PICO:
         ne.set("min", "0")
         ne.set("max", "0")   # min== max means ignore
         ne.set("step", "0")    # 0 means ignore
-        ne.text = self.temperature
+        ne.text = temperature
         xmldata.append(ne)
 
         # appends the xml data to be sent to the sender deque object
@@ -404,7 +390,7 @@ class _PICO:
     def newswitchvector(self, root):
         "Set LED state, and return a setSwitchVector"
         # get current led status
-        led = self.get_led_state()
+        led = self.led.status
 
         switchlist = root.findall("oneSwitch")
         for setting in switchlist:
@@ -422,10 +408,7 @@ class _PICO:
                 led = True
 
         # send this led state to the pico
-        if led:
-            self.rconn.publish('tx_to_pico', 'pico_led_On')
-        else:
-            self.rconn.publish('tx_to_pico', 'pico_led_Off')
+        self.led.status = led
 
         # send setSwitchVector vector
         self.setswitchvector(led)
@@ -437,12 +420,12 @@ class _PICO:
         "Reads current led state (if led not given), and sends a setSwitchVector"
         # get current led status
         if led is None:
-            led = self.get_led_state()
+            led = self.led.status
 
         # send setSwitchVector vector
         # create the response
         xmldata = ET.Element('setSwitchVector')
-        xmldata.set("device", 'Rempico01')
+        xmldata.set("device", _DEVICE)
         xmldata.set("name", 'LED')
  
         if self.monitor:
@@ -482,42 +465,134 @@ class _PICO:
 
         # create the defLightVector
         xmldata = ET.Element('defLightVector')
-        xmldata.set("device", 'Rempico01')
+        xmldata.set("device", _DEVICE)
         xmldata.set("name", 'MONITOR')
         xmldata.set("label", "REMPICO01 Status")
         xmldata.set("group", "Status")
         le = ET.Element('defLight')
         le.set("name", 'PICOALIVE')
         le.set("label", 'Monitor echo from pico 01')
-        if self.check_monitor_echo():
+        if self.monitor.status:
             xmldata.set("state", "Ok")
             le.text = "Ok"
+            self._monitor_status = True
         else:
             xmldata.set("state", "Alert")
             le.text = "Alert"
+            self._monitor_status = False
         xmldata.append(le)
 
         # appends the xml data to be sent to the sender deque object
         self.sender.append(ET.tostring(xmldata))
 
 
+
+
+
+class _LED:
+
+    def __init__(self, rconn):
+        "An object with a status property"
+        self.rconn = rconn
+        self.update()
+
+    def update(self):
+        "Request an update from the pico"
+        self.rconn.publish('tx_to_pico', 'pico_led')
+
+
+    @property
+    def status(self):
+        "Returns the led status, True or False"
+        pico_led = self.rconn.get('pico_led')
+        if pico_led == b'On':
+            return True
+        else:
+            return False
+
+
+    @status.setter
+    def status(self, newstatus):
+        """Called to set a new status value"""
+        # send this led state to the pico
+        if newstatus:
+            self.rconn.publish('tx_to_pico', 'pico_led_On')
+        else:
+            self.rconn.publish('tx_to_pico', 'pico_led_Off')
     
+
+
+class _TEMPERATURE:
+
+    conversion_factor = 3.3 / (65535)
+
+    def __init__(self, rconn):
+        "An object with a status property"
+        self.rconn = rconn
+        # start with zero centigrade, which should be immediately overwritten
+        self._temperature = "273.15"
+        self._timestamp = datetime.utcnow().isoformat(sep='T')
+        self.update()
+
+    def update(self):
+        "Request an update from the pico"
+        self.rconn.publish('tx_to_pico', 'pico_temperature')
+
+    @property
+    def status(self):
+        "Returns the temperature, timestamp. If not found, returns current self._temperature, self._timestamp"
+        reading = self.rconn.get('pico_temperature')
+        if reading is None:
+            return self._temperature, self._timestamp
+        # having read a temperature, delete it. so it is only valid for this timestamp
+        self.rconn.delete('pico_temperature')
+        # The temperature sensor measures the Vbe voltage of a biased bipolar diode, connected to the fifth ADC channel
+        # Typically, Vbe = 0.706V at 27 degrees C, with a slope of -1.721mV (0.001721) per degree. 
+        temperature = 27 - (int(reading)*self.conversion_factor - 0.706)/0.001721 + 273.15 # 273.15 added to convert to Kelvin
+        self._temperature = str(temperature)
+        self._timestamp = datetime.utcnow().isoformat(sep='T')
+        return self._temperature, self._timestamp
+
+
+class _MONITOR:
+
+    def __init__(self, rconn):
+        "An object with a status property"
+        self.rconn = rconn
+        self._count = 0
+        self.update()
+
+    def update(self):
+        "Request an update from the pico"
+        self._count += 1
+        if self._count == 255:
+            self._count = 0
+        self.rconn.publish('tx_to_pico', f'pico_monitor_{self._count}')
+
+    @property
+    def status(self):
+        "Returns True if receiving echos from the pico, False otherwise"
+        monitor_value = self.rconn.get('pico_monitor')
+        if monitor_value is None:
+            return False
+        if self._count == int(monitor_value):
+            return True
+        else:
+            return False
+
+
+
+
 
 if __name__=="__main__":
 
-    # create a redis connection
-    rconn = redis.StrictRedis(host='localhost', port=6379, db=0)
+    # start this blocking call
+    driver()
 
-    # now start eventloop to read and write to stdin, stdout
-    loop = asyncio.get_event_loop()
 
-    connections = _PICO(rconn, loop)
 
-    while True:
-        try:
-            loop.run_until_complete(connections.handle_data())
-        finally:
-            loop.close()
+    
+
 
 
 
