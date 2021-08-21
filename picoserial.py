@@ -55,6 +55,15 @@ def receiver(ser, rconn):
         # Temperature, as a two byte a to d conversion, save to redis as integer
         value = int.from_bytes( [returnval[1], returnval[2]], 'big')
         rconn.set('pico_temperature', value)
+    elif returnval[0] == 7:
+        # the status code of the door, save to redis as integer
+        if (returnval[1] == 1):
+            # it is door motor 1
+            rconn.set('pico_roofdoor1', int.from_bytes([returnval[2]], 'big')  )
+        else:
+            # it is door motor 0
+            rconn.set('pico_roofdoor0', int.from_bytes([returnval[2]], 'big')  )
+
        
 
 
@@ -62,10 +71,14 @@ def sender(data, ser, rconn):
     "Sends data via the serial port"
     if data == b'pico_led_On':
         # turns on led
-        set_led(True, ser, rconn)
+        bincode = bytes([1, 25, 1, 255])  # send bytes to pico
+        ser.write(bincode)
+        rconn.set('pico_led', 'On')  # save value in redis
     elif data == b'pico_led_Off':
         # turns off led
-        set_led(False, ser, rconn)
+        bincode = bytes([1, 25, 0, 255])  # send bytes to pico
+        ser.write(bincode)
+        rconn.set('pico_led', 'Off')
     elif data == b'pico_led':
         # requests led status
         bincode = bytes([2, 25, 0, 255])
@@ -79,22 +92,28 @@ def sender(data, ser, rconn):
     elif data == b'pico_temperature':
         bincode = bytes([5, 4, 0, 255])  # send temperature request to pico
         ser.write(bincode)
+    # the following opens/closes the doors
+    elif data == b'pico_roof_open':
+        bincode = bytes([9, 0, 0, 255])  # send request to open both doors to pico
+        ser.write(bincode)
+    elif data == b'pico_roof_close':
+        bincode = bytes([9, 0, 1, 255])  # send request to close both doors to pico
+        ser.write(bincode)
+    # the following allows control of individual roof doors - not used in normal operation
+    elif data == b'pico_roof0_open':
+        bincode = bytes([8, 0, 0, 255])  # send request to open door 0 to pico
+        ser.write(bincode)
+    elif data == b'pico_roof0_close':
+        bincode = bytes([8, 0, 1, 255])  # send request to close door 0 to pico
+        ser.write(bincode)
+    elif data == b'pico_roof1_open':
+        bincode = bytes([8, 1, 0, 255])  # send request to open door 1 to pico
+        ser.write(bincode)
+    elif data == b'pico_roof1_close':
+        bincode = bytes([8, 1, 1, 255])  # send request to close door1 to pico
+        ser.write(bincode)
 
 
-def set_led(state, ser, rconn):
-    "if state is True, turn on the LED, False, turn it off"
-    # code:  1
-    # pin:  25
-    # state: 1 or 0
-    if state:
-        bincode = bytes([1, 25, 1, 255])  # send bytes to pico
-        ser.write(bincode)
-        rconn.set('pico_led', 'On')  # save value in redis
-    else:
-        bincode = bytes([1, 25, 0, 255])  # send bytes to pico
-        ser.write(bincode)
-        rconn.set('pico_led', 'Off')
-    # If another process wants the LED value, it uses redis get('pico_led')
 
 
 if __name__ == "__main__":
