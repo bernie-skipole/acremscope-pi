@@ -22,6 +22,8 @@ OPENING
 CLOSING
 CLOSED
 
+If the actual state is none of these, ie unknown, then an alert is needed
+
 
 """
 
@@ -30,6 +32,8 @@ import os, sys, collections, asyncio, time
 import xml.etree.ElementTree as ET
 
 from datetime import datetime
+
+import redis
 
 # All xml data received on the port from the client should be contained in one of the following tags
 TAGS = (b'getProperties',
@@ -47,15 +51,17 @@ _ENDTAGS = tuple(b'</' + tag + b'>' for tag in TAGS)
 
 _DEVICE = 'Roll off door'
 _NAME = 'DOME_SHUTTER'
-_OPEN = 'SHUTTER_OPEN'
-_CLOSE = 'SHUTTER_CLOSE'
+
 
 def driver():
     "Blocking call"
 
+    # create a redis connection
+    rconn = redis.StrictRedis(host='localhost', port=6379, db=0)
+
     # create a class which handles the hardware
     # this has a status property,  one of OPEN, OPENING, CLOSING, CLOSED
-    door = _DOOR()
+    door = _DOOR(rconn)
 
     # now start eventloop to read and write to stdin, stdout
     loop = asyncio.get_event_loop()
@@ -217,53 +223,48 @@ class _Driver:
 
         elif root.tag == "newSwitchVector":
             # the client is requesting a door open/shut
-            self.action(root)
+            # expecting something like
+            # <newSwitchVector device="Roll off door" name="DOME_SHUTTER">
+            #   <oneSwitch name="SHUTTER_OPEN">On</oneSwitch>
+            # </newSwitchVector>
 
-    def action(self, root):
-        "A request has arrived to open/close the door, take the appropriate action"
+            device = root.get("device")
+            if device != _DEVICE:
+                # not a recognised device
+                return
 
-       # expecting something like
-        # <newSwitchVector device="Roll off door" name="DOME_SHUTTER">
-        #   <oneSwitch name="SHUTTER_OPEN">On</oneSwitch>
-        # </newSwitchVector>
+            name = root.get("name")
+            # name must be 'DOME_SHUTTER' which is the only property
+            # of this device
+            if name != _NAME:
+                # not a recognised property
+                return
 
-        device = root.get("device")
-        if device != _DEVICE:
-            # not a recognised device
-            return
+            newstatus = None
 
-        name = root.get("name")
-        # name must be 'DOME_SHUTTER' which is the only property
-        # of this device
-        if name != _NAME:
-            # not a recognised property
-            return
+            switchlist = root.findall("oneSwitch")
+            for setting in switchlist:
+                # property name
+                pn = setting.get("name")
+                # get switch On or Off, remove newlines
+                content = setting.text.strip()
+                if (pn == 'SHUTTER_OPEN') and (content == "On"):
+                    newstatus = "OPENING"
+                elif (pn == 'SHUTTER_OPEN') and (content == "Off"):
+                    newstatus = "CLOSING"
+                elif (pn == 'SHUTTER_CLOSE') and (content == "On"):
+                    newstatus = "CLOSING"
+                elif (pn == 'SHUTTER_CLOSE') and (content == "Off"):
+                    newstatus = "OPENING"
 
-        newstatus = None
+            if newstatus is None:
+                return
 
-        switchlist = root.findall("oneSwitch")
-        for setting in switchlist:
-            # property name
-            pn = setting.get("name")
-            # get switch On or Off, remove newlines
-            content = setting.text.strip()
-            if (pn == _OPEN) and (content == "On"):
-                newstatus = "OPENING"
-            if (pn == _OPEN) and (content == "Off"):
-                newstatus = "CLOSING"
-            if (pn == _CLOSE) and (content == "On"):
-                newstatus = "CLOSING"
-            if (pn == _CLOSE) and (content == "Off"):
-                newstatus = "OPENING"
+            # set this action in hardware
+            self.hardware.status = newstatus
 
-        if newstatus is None:
-            return
-
-        # set this action in hardware
-        self.hardware.status = newstatus
-
-        # the self.update() method will detect the change in status
-        # and will send the appropriate setXXXVectors
+            # the self.update() method will detect the change in status
+            # and will send the appropriate setXXXVectors
 
 
 
@@ -281,7 +282,7 @@ class _Driver:
         xmldata.set("rule", "OneOfMany")
 
         se_open = ET.Element('defSwitch')
-        se_open.set("name", _OPEN)
+        se_open.set("name", 'SHUTTER_OPEN')
         if self.status == "OPEN":
             se_open.text = "On"
             xmldata.set("state", "Ok")
@@ -293,7 +294,7 @@ class _Driver:
         xmldata.append(se_open)
 
         se_close = ET.Element('defSwitch')
-        se_close.set("name", _CLOSE)
+        se_close.set("name", 'SHUTTER_CLOSE')
         if self.status == "CLOSED":
             se_close.text = "On"
             xmldata.set("state", "Ok")
@@ -320,7 +321,7 @@ class _Driver:
         # with its two switch states
 
         se_open = ET.Element('oneSwitch')
-        se_open.set("name", _OPEN)
+        se_open.set("name", 'SHUTTER_OPEN')
         if self.status == "OPEN":
             se_open.text = "On"
             xmldata.set("state", "Ok")
@@ -332,7 +333,7 @@ class _Driver:
         xmldata.append(se_open)
 
         se_close = ET.Element('oneSwitch')
-        se_close.set("name", _CLOSE)
+        se_close.set("name", 'SHUTTER_CLOSE')
         if self.status == "CLOSED":
             se_close.text = "On"
             xmldata.set("state", "Ok")
@@ -345,8 +346,6 @@ class _Driver:
         # appends the xml data to be sent to the sender deque object
         self.sender.append(ET.tostring(xmldata))
         return
-
-
 
 
     def defLightVector(self):
@@ -437,72 +436,51 @@ class _Driver:
         return
 
 
-
 class _DOOR:
 
-
-    def __init__(self):
+    def __init__(self, rconn):
         "An object with a status property"
         # status will be one of OPEN CLOSED OPENING CLOSING
-        self._status = 'CLOSED'
-        self.statechange = time.monotonic()
-        # self.statechange is when the last change of state took place
-        # and is used to measure how long a door opens or closes
-        # initially used for the door simulation, but could be used in future
-        # to speed up / slow down the door motion
-        
-        # eventually the status property will measure actual hardware, so call
-        # it now to set the correct self._status value
-        self._status = self.status
+        self._status = "CLOSED"
+        self.rconn = rconn
+        self.update()
 
+    def update(self):
+        "Request an update from the pico"
+        self.rconn.publish('tx_to_pico', 'pico_roof')
 
     @property
     def status(self):
         """Monitors the door, and returns the door status, one of OPEN CLOSED OPENING CLOSING"""
-        # the door may have changed if it has completed its travel
-        # simulate this with assuming travel takes 20 seconds ( will eventually test hardware limit switches )
-        if self._status == "OPENING":
-            # self.statechange must have changed when the door status
-            # changed to OPENING, so see if 20
-            # seconds have past since then
-            timenow = time.monotonic()
-            if timenow - self.statechange > 20:
-                # door has opened, and is now OPEN
-                self.statechange = timenow
-                self._status = "OPEN"
-                return "OPEN"
-        if self._status == "CLOSING":
-            # self.statechange must have changed when the door status
-            # changed to CLOSING, so see if 20
-            # seconds have past since then
-            timenow = time.monotonic()
-            if timenow - self.statechange > 20:
-                # door has finished closing, and is now CLOSED
-                self.statechange = timenow
-                self._status = "CLOSED"
-                return "CLOSED"
-        # no change is requested, or has occurred
+        roof_status1 = self.rconn.get('pico_roofdoor1')
+        roof_status0 = self.rconn.get('pico_roofdoor0')
+        # both doors must be the same to set the status
+        if roof_status0 != roof_status1:
+            return self._status
+        # roof_status0 is a numeric code
+        # 1 : open
+        # 2 : opening
+        # 3 : closed
+        # 4 : closing
+        if roof_status0 == 1:
+            self._status = "OPEN"
+        elif roof_status0 == 2:
+            self._status = "OPENING"
+        elif roof_status0 == 3:
+            self._status = "CLOSED"
+        elif roof_status0 == 4:
+            self._status = "CLOSING"
         return self._status
 
     @status.setter
     def status(self, newstatus):
         """Called to set a new status value"""
-        if newstatus == self._status:
-            # no change
-            return
-        if newstatus not in ("CLOSING", "OPENING"):
-            # OPEN or CLOSE are set by the door itself (simulated here by a timer)
-            # not by external request, which can only initiate CLOSING or OPENING 
-            return
-        # to get here, newstatus must
-        # indicate a change from Open to Closing
-        #                        Closed to Opening
-        #                        Opening to Closing
-        #                        Closing to Opening
-        # in each case, accept the new value, and start the statechange again
-        self._status = newstatus
-        self.statechange = time.monotonic()
- 
+        # send this led state to the pico
+        if newstatus == "CLOSING":
+            self.rconn.publish('tx_to_pico', 'pico_roof_close')
+        elif newstatus == "OPENING":
+            self.rconn.publish('tx_to_pico', 'pico_roof_open')
+
     
 
 if __name__=="__main__":

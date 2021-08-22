@@ -92,7 +92,13 @@ def sender(data, ser, rconn):
     elif data == b'pico_temperature':
         bincode = bytes([5, 4, 0, 255])  # send temperature request to pico
         ser.write(bincode)
-    # the following opens/closes the doors
+    elif data == b'pico_roof':
+        # ask for roof status
+        bincode = bytes([6, 1, 0, 255])  # send request for status for door number 0
+        ser.write(bincode)
+        bincode = bytes([6, 1, 1, 255])  # send request for status for door number 1
+        ser.write(bincode)
+    # the following opens/closes both doors
     elif data == b'pico_roof_open':
         bincode = bytes([9, 0, 0, 255])  # send request to open both doors to pico
         ser.write(bincode)
