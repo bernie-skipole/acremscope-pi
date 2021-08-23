@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/home/bernard/acenv/bin/python3
 
 
 """doordriver.py
@@ -454,21 +454,26 @@ class _DOOR:
         """Monitors the door, and returns the door status, one of OPEN CLOSED OPENING CLOSING"""
         roof_status1 = self.rconn.get('pico_roofdoor1')
         roof_status0 = self.rconn.get('pico_roofdoor0')
+        if roof_status0 is None:
+            return
+        if roof_status1 is None
+            return
         # both doors must be the same to set the status
         if roof_status0 != roof_status1:
             return self._status
-        # roof_status0 is a numeric code
+        status = int(roof_status0)
+        # status is a numeric code
         # 1 : open
         # 2 : opening
         # 3 : closed
         # 4 : closing
-        if roof_status0 == 1:
+        if status == 1:
             self._status = "OPEN"
-        elif roof_status0 == 2:
+        elif status == 2:
             self._status = "OPENING"
-        elif roof_status0 == 3:
+        elif status == 3:
             self._status = "CLOSED"
-        elif roof_status0 == 4:
+        elif status == 4:
             self._status = "CLOSING"
         return self._status
 
