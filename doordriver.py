@@ -456,7 +456,7 @@ class _DOOR:
         roof_status0 = self.rconn.get('pico_roofdoor0')
         if roof_status0 is None:
             return
-        if roof_status1 is None
+        if roof_status1 is None:
             return
         # both doors must be the same to set the status
         if roof_status0 != roof_status1:
