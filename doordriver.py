@@ -444,6 +444,8 @@ class _DOOR:
         self._status = "CLOSED"
         self.rconn = rconn
         self.update()
+        self.alarm = False
+        self.alarmtext = ""
 
     def update(self):
         "Request an update from the pico"
@@ -452,28 +454,56 @@ class _DOOR:
     @property
     def status(self):
         """Monitors the door, and returns the door status, one of OPEN CLOSED OPENING CLOSING"""
+        # status is a numeric code
+        # 1 : open
+        # 2 : opening
+        # 3 : closed
+        # 4 : closing
+
+        # could also receive
+        # 5 : Error - believed open, but limit switch has not closed
+        # 6 : Error - believed closed, but limit switch has not closed
+
         roof_status1 = self.rconn.get('pico_roofdoor1')
         roof_status0 = self.rconn.get('pico_roofdoor0')
         if roof_status0 is None:
             return
         if roof_status1 is None:
             return
+
+        status0 = int(roof_status0)
+        status1 = int(roof_status1)
+
+        if (status0 > 4) or (status1 > 4):
+            # set commen alarm signal
+            self.alarm = True
+        else:
+            self.alarm = False
+
+        if status0 == 5:
+            self.alarmtext = "Error - Left Door believed open, but limit switch has not closed"
+            status0 = 1
+        if status0 == 6:
+            self.alarmtext = "Error - Left Door believed closed, but limit switch has not closed"
+            status0 = 3
+        if status1 == 5:
+            self.alarmtext = "Error - Right Door believed open, but limit switch has not closed"
+            status1 = 1
+        if status1 == 6:
+            self.alarmtext = "Error - Right Door believed closed, but limit switch has not closed"
+            status1 = 3
+
         # both doors must be the same to set the status
-        if roof_status0 != roof_status1:
+        if status0 != status1:
             return self._status
-        status = int(roof_status0)
-        # status is a numeric code
-        # 1 : open
-        # 2 : opening
-        # 3 : closed
-        # 4 : closing
-        if status == 1:
+
+        if status0 == 1:
             self._status = "OPEN"
-        elif status == 2:
+        elif status0 == 2:
             self._status = "OPENING"
-        elif status == 3:
+        elif status0 == 3:
             self._status = "CLOSED"
-        elif status == 4:
+        elif status0 == 4:
             self._status = "CLOSING"
         return self._status
 
