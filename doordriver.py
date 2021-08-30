@@ -12,7 +12,7 @@ Consists of a switch vector,
 property name = DOME_SHUTTER
 elements = SHUTTER_OPEN, SHUTTER_CLOSE
 
-and a light vector which reports open, openning, closing, close, consists of four
+and a light vector which reports open, opening, closing, closed, consists of four
 elements
 
 property name = DOOR_STATE
@@ -23,7 +23,6 @@ CLOSING
 CLOSED
 
 If the actual state is none of these, ie unknown, then an alert is needed
-
 
 """
 
@@ -82,6 +81,7 @@ class _Driver:
         self.loop = loop
         self.hardware = hardware
         self.status = hardware.status
+        self.alarmtext = hardware.alarmtext
         self.sender = collections.deque(maxlen=100)
 
     async def handle_data(self):
@@ -107,15 +107,15 @@ class _Driver:
             await asyncio.sleep(1)
             # call setLightVector, which sets the vector into the sender deque if the door status has changed.
             status = self.hardware.status
-            if status == self.status:
-                # There has been no change to the status
-                continue
-            # There has been a change in the status
-            self.status = status
-            # set the lights to show the new status, this puts xml data into sender
-            self.setLightVector()
-            # also set the switch
-            self.setSwitchVector()
+            alarmtext = self.hardware.alarmtext
+            if (status != self.status) or (alarmtext != self.alarmtext):
+                # There has been a change to the status or to the alarm
+                self.status = status
+                self.alarmtext = alarmtext
+                # set the lights to show the new status, this puts xml data into sender
+                self.setLightVector()
+                # also set the switch
+                self.setSwitchVector()
 
 
     async def writer(self, writer):
@@ -297,7 +297,11 @@ class _Driver:
         se_close.set("name", 'SHUTTER_CLOSE')
         if self.status == "CLOSED":
             se_close.text = "On"
-            xmldata.set("state", "Ok")
+            if self.alarmtext:
+                # If an alert is active, the status will always be CLOSED
+                xmldata.set("state", "Alert")
+            else:
+                xmldata.set("state", "Ok")
         elif self.status == "CLOSING":
             se_close.text = "On"
             xmldata.set("state", "Busy")
@@ -336,7 +340,11 @@ class _Driver:
         se_close.set("name", 'SHUTTER_CLOSE')
         if self.status == "CLOSED":
             se_close.text = "On"
-            xmldata.set("state", "Ok")
+            if self.alarmtext:
+                # If an alert is active, the status will always be CLOSED
+                xmldata.set("state", "Alert")
+            else:
+                xmldata.set("state", "Ok")
         elif self.status == "CLOSING":
             se_close.text = "On"
             xmldata.set("state", "Busy")
@@ -357,8 +365,11 @@ class _Driver:
         xmldata.set("name", 'DOOR_STATE')
         xmldata.set("label", "Roll Off door status")
         xmldata.set("group", "Status")
-        xmldata.set("state", "Ok")
         xmldata.set("timestamp", timestamp)
+        if self.alarmtext:
+            xmldata.set("state", "Alert")
+        else:
+            xmldata.set("state", "Ok")
         # four lights
         # OPEN
         # OPENING
@@ -384,7 +395,11 @@ class _Driver:
         elif self.status == "CLOSING":
             e3.text = "Ok"
         elif self.status == "CLOSED":
-            e4.text = "Ok"
+            if self.alarmtext:
+                # If an alert is active, the status will always be CLOSED
+                e4.text = "Alert"
+            else:
+                e4.text = "Ok"
         xmldata.append(e1)
         xmldata.append(e2)
         xmldata.append(e3)
@@ -400,6 +415,12 @@ class _Driver:
         xmldata.set("device", _DEVICE)
         xmldata.set("name", 'DOOR_STATE')
         xmldata.set("timestamp", timestamp)
+        if self.alarmtext:
+            xmldata.set("state", "Alert")
+            xmldata.set("message", self.alarmtext)
+        else:
+            xmldata.set("state", "Ok")
+            xmldata.set("message", "")
         # four lights
         # OPEN
         # OPENING
@@ -426,7 +447,11 @@ class _Driver:
         elif self.status == "CLOSING":
             e3.text = "Ok"
         elif self.status == "CLOSED":
-            e4.text = "Ok"
+            if self.alarmtext:
+                # If an alert is active, the status will always be CLOSED
+                e4.text = "Alert"
+            else:
+                e4.text = "Ok"
         xmldata.append(e1)
         xmldata.append(e2)
         xmldata.append(e3)
@@ -453,9 +478,9 @@ class _DOOR:
 
 
     @property
-    def status_code0(self, door):
+    def status_code(self, door):
         """Monitors door ( equal to 0 or 1) and returns status code"""
-        # status is a numeric code
+        # returns a numeric code
         # 0 : unknown
         # 1 : open
         # 2 : opening
@@ -464,48 +489,46 @@ class _DOOR:
         # could also receive
         # 5 : Error - believed open, but limit switch has not closed
         # 6 : Error - believed closed, but limit switch has not closed
-        roof_status = self.rconn.get(f'pico_roofdoor{door}')
-        if roof_status is None:
+        door_code = self.rconn.get(f'pico_roofdoor{door}')
+        if door_code is None:
             return 0
-        return int(roof_status)
+        return int(door_code)
 
 
     @property
     def status(self):
         """Monitors the door, and returns the door status, one of OPEN CLOSED OPENING CLOSING
-           returns None, if status unknown.
            On Error, always return CLOSED, to prevent telescope operation"""
 
-        status1 = self.status_code0(1)
-        status0 = self.status_code0(0)
+        status0 = self.status_code(0)
+        status1 = self.status_code(1)
+
+        self.alarm = False
+        self.alarmtext = ""
 
         if not status0:
             self.alarm = True
             self.alarmtext = "Error - Left Door alert, status unknown."
-            status0 = 3
         if not status1:
             self.alarm = True
             self.alarmtext = "Error - Right Door alert, status unknown."
-            status1 = 3
 
         if (status0 > 4) or (status1 > 4):
             # set commen alarm signal
             self.alarm = True
-        else:
-            self.alarm = False
+            if status0 == 5:
+                self.alarmtext = "Error - Left Door alert, OPEN limit switch has not closed"
+            if status0 == 6:
+                self.alarmtext = "Error - Left Door alert, CLOSED limit switch has not closed"
+            if status1 == 5:
+                self.alarmtext = "Error - Right Door alert, OPEN limit switch has not closed"
+            if status1 == 6:
+                self.alarmtext = "Error - Right Door alert, CLOSED limit switch has not closed"
 
-        if status0 == 5:
-            self.alarmtext = "Error - Left Door alert, OPEN limit switch has not closed"
-            status0 = 3
-        if status0 == 6:
-            self.alarmtext = "Error - Left Door alert, CLOSED limit switch has not closed"
-            status0 = 3
-        if status1 == 5:
-            self.alarmtext = "Error - Right Door alert, OPEN limit switch has not closed"
-            status1 = 3
-        if status1 == 6:
-            self.alarmtext = "Error - Right Door alert, CLOSED limit switch has not closed"
-            status1 = 3
+        if self.alarm:
+            # On Error, always return CLOSED, to prevent telescope operation
+            self._status = "CLOSED"
+            return "CLOSED"
 
         # both doors must be the same to set the status
         if status0 != status1:
@@ -521,10 +544,12 @@ class _DOOR:
             self._status = "CLOSING"
         return self._status
 
+
     @status.setter
     def status(self, newstatus):
         """Called to set a new status value"""
-        # send this led state to the pico
+        # send this state instruction to the pico, must be either CLOSING or OPENING
+        # does not set self._status, this is set by the pico returning a status code
         if newstatus == "CLOSING":
             self.rconn.publish('tx_to_pico', 'pico_roof_close')
         elif newstatus == "OPENING":
