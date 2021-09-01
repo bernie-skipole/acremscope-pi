@@ -105,7 +105,6 @@ class _Driver:
         # check every second, but sender is only updated if a status changes
         while True:            
             await asyncio.sleep(1)
-            # call setLightVector, which sets the vector into the sender deque if the door status has changed.
             status = self.hardware.status
             alarmtext = self.hardware.alarmtext
             if (status != self.status) or (alarmtext != self.alarmtext):
@@ -281,14 +280,19 @@ class _Driver:
         xmldata.set("perm", "rw")
         xmldata.set("rule", "OneOfMany")
 
+        if self.hardware.alarm:
+            xmldata.set("state", "Alert")
+        else:
+            xmldata.set("state", "Ok")
+
         se_open = ET.Element('defSwitch')
         se_open.set("name", 'SHUTTER_OPEN')
         if self.status == "OPEN":
             se_open.text = "On"
-            xmldata.set("state", "Ok")
         elif self.status == "OPENING":
             se_open.text = "On"
-            xmldata.set("state", "Busy")
+            if not self.hardware.alarm:
+                xmldata.set("state", "Busy")
         else:
             se_open.text = "Off"
         xmldata.append(se_open)
@@ -297,14 +301,10 @@ class _Driver:
         se_close.set("name", 'SHUTTER_CLOSE')
         if self.status == "CLOSED":
             se_close.text = "On"
-            if self.alarmtext:
-                # If an alert is active, the status will always be CLOSED
-                xmldata.set("state", "Alert")
-            else:
-                xmldata.set("state", "Ok")
         elif self.status == "CLOSING":
             se_close.text = "On"
-            xmldata.set("state", "Busy")
+            if not self.hardware.alarm:
+                xmldata.set("state", "Busy")
         else:
             se_close.text = "Off"
         xmldata.append(se_close)
@@ -322,16 +322,21 @@ class _Driver:
         xmldata.set("name", _NAME)
         xmldata.set("timestamp", timestamp)
 
+        if self.hardware.alarm:
+            xmldata.set("state", "Alert")
+        else:
+            xmldata.set("state", "Ok")
+
         # with its two switch states
 
         se_open = ET.Element('oneSwitch')
         se_open.set("name", 'SHUTTER_OPEN')
         if self.status == "OPEN":
             se_open.text = "On"
-            xmldata.set("state", "Ok")
         elif self.status == "OPENING":
             se_open.text = "On"
-            xmldata.set("state", "Busy")
+            if not self.hardware.alarm:
+                xmldata.set("state", "Busy")
         else:
             se_open.text = "Off"
         xmldata.append(se_open)
@@ -340,14 +345,10 @@ class _Driver:
         se_close.set("name", 'SHUTTER_CLOSE')
         if self.status == "CLOSED":
             se_close.text = "On"
-            if self.alarmtext:
-                # If an alert is active, the status will always be CLOSED
-                xmldata.set("state", "Alert")
-            else:
-                xmldata.set("state", "Ok")
         elif self.status == "CLOSING":
             se_close.text = "On"
-            xmldata.set("state", "Busy")
+            if not self.hardware.alarm:
+                xmldata.set("state", "Busy")
         else:
             se_close.text = "Off"
         xmldata.append(se_close)
@@ -366,15 +367,18 @@ class _Driver:
         xmldata.set("label", "Roll Off door status")
         xmldata.set("group", "Status")
         xmldata.set("timestamp", timestamp)
-        if self.alarmtext:
+        if self.hardware.alarm:
             xmldata.set("state", "Alert")
+            xmldata.set("message", self.alarmtext)
         else:
             xmldata.set("state", "Ok")
-        # four lights
+            xmldata.set("message", "")
+        # five lights
         # OPEN
         # OPENING
         # CLOSING
         # CLOSED
+        # UNKNOWN
         # Idle|Ok|Busy|Alert
         e1 = ET.Element('defLight')
         e1.set("name", "OPEN")
@@ -388,22 +392,24 @@ class _Driver:
         e4 = ET.Element('defLight')
         e4.set("name", "CLOSED")
         e4.text = "Idle"
-        if self.status == "OPEN":
+        e5 = ET.Element('defLight')
+        e5.set("name", "UNKNOWN")
+        e5.text = "Idle"
+        if self.hardware.alarm:
+            e5.text = "Alert"
+        elif self.status == "OPEN":
             e1.text = "Ok"
         elif self.status == "OPENING":
             e2.text = "Ok"
         elif self.status == "CLOSING":
             e3.text = "Ok"
         elif self.status == "CLOSED":
-            if self.alarmtext:
-                # If an alert is active, the status will always be CLOSED
-                e4.text = "Alert"
-            else:
-                e4.text = "Ok"
+            e4.text = "Ok"
         xmldata.append(e1)
         xmldata.append(e2)
         xmldata.append(e3)
         xmldata.append(e4)
+        xmldata.append(e5)
         # appends the xml data to be sent to the sender deque object
         self.sender.append(ET.tostring(xmldata))
         return
@@ -415,7 +421,7 @@ class _Driver:
         xmldata.set("device", _DEVICE)
         xmldata.set("name", 'DOOR_STATE')
         xmldata.set("timestamp", timestamp)
-        if self.alarmtext:
+        if self.hardware.alarm:
             xmldata.set("state", "Alert")
             xmldata.set("message", self.alarmtext)
         else:
@@ -426,6 +432,7 @@ class _Driver:
         # OPENING
         # CLOSING
         # CLOSED
+        # UNKNOWN
         # Idle|Ok|Busy|Alert
         e1 = ET.Element('oneLight')
         e1.set("name", "OPEN")
@@ -439,23 +446,24 @@ class _Driver:
         e4 = ET.Element('oneLight')
         e4.set("name", "CLOSED")
         e4.text = "Idle"
-
-        if self.status == "OPEN":
+        e5 = ET.Element('oneLight')
+        e5.set("name", "UNKNOWN")
+        e5.text = "Idle"
+        if self.hardware.alarm:
+            e5.text = "Alert"
+        elif self.status == "OPEN":
             e1.text = "Ok"
         elif self.status == "OPENING":
             e2.text = "Ok"
         elif self.status == "CLOSING":
             e3.text = "Ok"
         elif self.status == "CLOSED":
-            if self.alarmtext:
-                # If an alert is active, the status will always be CLOSED
-                e4.text = "Alert"
-            else:
-                e4.text = "Ok"
+            e4.text = "Ok"
         xmldata.append(e1)
         xmldata.append(e2)
         xmldata.append(e3)
         xmldata.append(e4)
+        xmldata.append(e5)
         # appends the xml data to be sent to the sender deque object
         self.sender.append(ET.tostring(xmldata))
         return
