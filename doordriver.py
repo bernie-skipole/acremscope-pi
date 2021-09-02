@@ -249,12 +249,16 @@ class _Driver:
                 content = setting.text.strip()
                 if (pn == 'SHUTTER_OPEN') and (content == "On"):
                     newstatus = "OPENING"
+                    self.alarmtext = "Door open request received"
                 elif (pn == 'SHUTTER_OPEN') and (content == "Off"):
                     newstatus = "CLOSING"
+                    self.alarmtext = "Door close request received"
                 elif (pn == 'SHUTTER_CLOSE') and (content == "On"):
                     newstatus = "CLOSING"
+                    self.alarmtext = "Door close request received"
                 elif (pn == 'SHUTTER_CLOSE') and (content == "Off"):
                     newstatus = "OPENING"
+                    self.alarmtext = "Door open request received"
 
             if newstatus is None:
                 return
@@ -485,7 +489,6 @@ class _DOOR:
         self.rconn.publish('tx_to_pico', 'pico_roof')
 
 
-    @property
     def status_code(self, door):
         """Monitors door ( equal to 0 or 1) and returns status code"""
         # returns a numeric code
