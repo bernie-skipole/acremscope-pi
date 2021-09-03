@@ -500,6 +500,7 @@ class _DOOR:
         # could also receive
         # 5 : Error - believed open, but limit switch has not closed
         # 6 : Error - believed closed, but limit switch has not closed
+        # 7 : Error - both limit switches are closed
         door_code = self.rconn.get(f'pico_roofdoor{door}')
         if door_code is None:
             return 0
@@ -531,10 +532,14 @@ class _DOOR:
                 self.alarmtext = "Error - Left Door alert, OPEN limit switch has not closed"
             if status0 == 6:
                 self.alarmtext = "Error - Left Door alert, CLOSED limit switch has not closed"
+            if status0 == 7:
+                self.alarmtext = "Error - Left Door alert, both limit switches are closed"
             if status1 == 5:
                 self.alarmtext = "Error - Right Door alert, OPEN limit switch has not closed"
             if status1 == 6:
                 self.alarmtext = "Error - Right Door alert, CLOSED limit switch has not closed"
+            if status1 == 7:
+                self.alarmtext = "Error - Right Door alert, both limit switches are closed"
 
         if self.alarm:
             # On Error, always return CLOSED, to prevent telescope operation
