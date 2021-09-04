@@ -554,16 +554,16 @@ class _DOOR:
 
         if status0 == 1:
             self._status = "OPEN"
-            self.lightvectormessage = "Door Open"
+            self.lightvectormessage = "Roll-Off door Open"
         elif status0 == 2:
             self._status = "OPENING"
-            self.lightvectormessage = "Door Opening"
+            self.lightvectormessage = "Roll-Off door Opening"
         elif status0 == 3:
             self._status = "CLOSED"
-            self.lightvectormessage = "Door Closed"
+            self.lightvectormessage = "Roll-Off door Closed"
         elif status0 == 4:
             self._status = "CLOSING"
-            self.lightvectormessage = "Door Closing"
+            self.lightvectormessage = "Roll-Off door Closing"
         return self._status
 
 
