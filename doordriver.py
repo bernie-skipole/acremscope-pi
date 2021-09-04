@@ -81,7 +81,7 @@ class _Driver:
         self.loop = loop
         self.hardware = hardware
         self.status = hardware.status
-        self.alarmtext = hardware.alarmtext
+        self.lightvectormessage = hardware.lightvectormessage
         self.sender = collections.deque(maxlen=100)
 
     async def handle_data(self):
@@ -106,11 +106,11 @@ class _Driver:
         while True:            
             await asyncio.sleep(1)
             status = self.hardware.status
-            alarmtext = self.hardware.alarmtext
-            if (status != self.status) or (alarmtext != self.alarmtext):
-                # There has been a change to the status or to the alarm
+            lightvectormessage = self.hardware.lightvectormessage
+            if (status != self.status) or (lightvectormessage != self.lightvectormessage):
+                # There has been a change to the status or to the lightvectormessage
                 self.status = status
-                self.alarmtext = alarmtext
+                self.lightvectormessage = lightvectormessage
                 # set the lights to show the new status, this puts xml data into sender
                 self.setLightVector()
                 # also set the switch
@@ -249,24 +249,28 @@ class _Driver:
                 content = setting.text.strip()
                 if (pn == 'SHUTTER_OPEN') and (content == "On"):
                     newstatus = "OPENING"
-                    self.alarmtext = "Door open request received"
+                    self.lightvectormessage = "Door open request received"
                 elif (pn == 'SHUTTER_OPEN') and (content == "Off"):
                     newstatus = "CLOSING"
-                    self.alarmtext = "Door close request received"
+                    self.lightvectormessage = "Door close request received"
                 elif (pn == 'SHUTTER_CLOSE') and (content == "On"):
                     newstatus = "CLOSING"
-                    self.alarmtext = "Door close request received"
+                    self.lightvectormessage = "Door close request received"
                 elif (pn == 'SHUTTER_CLOSE') and (content == "Off"):
                     newstatus = "OPENING"
-                    self.alarmtext = "Door open request received"
+                    self.lightvectormessage = "Door open request received"
 
             if newstatus is None:
                 return
 
+            # set the lights to show the new lightvectormessage, this puts xml data into sender
+            self.setLightVector()
+
             # set this action in hardware
             self.hardware.status = newstatus
 
-            # the self.update() method will detect the change in status
+            # the self.update() method will detect the change in status from the pico
+            # as the door starts to open or close
             # and will send the appropriate setXXXVectors
 
 
@@ -373,7 +377,7 @@ class _Driver:
         xmldata.set("timestamp", timestamp)
         if self.hardware.alarm:
             xmldata.set("state", "Alert")
-            xmldata.set("message", self.alarmtext)
+            xmldata.set("message", self.lightvectormessage)
         else:
             xmldata.set("state", "Ok")
             xmldata.set("message", "")
@@ -425,12 +429,11 @@ class _Driver:
         xmldata.set("device", _DEVICE)
         xmldata.set("name", 'DOOR_STATE')
         xmldata.set("timestamp", timestamp)
+        xmldata.set("message", self.lightvectormessage)
         if self.hardware.alarm:
             xmldata.set("state", "Alert")
-            xmldata.set("message", self.alarmtext)
         else:
             xmldata.set("state", "Ok")
-            xmldata.set("message", "")
         # four lights
         # OPEN
         # OPENING
@@ -482,7 +485,7 @@ class _DOOR:
         self.rconn = rconn
         self.update()
         self.alarm = False
-        self.alarmtext = ""
+        self.lightvectormessage = ""
 
     def update(self):
         "Request an update from the pico"
@@ -516,30 +519,29 @@ class _DOOR:
         status1 = self.status_code(1)
 
         self.alarm = False
-        self.alarmtext = ""
 
         if not status0:
             self.alarm = True
-            self.alarmtext = "Error - Left Door alert, status unknown."
+            self.lightvectormessage = "Error - Left Door alert, status unknown."
         if not status1:
             self.alarm = True
-            self.alarmtext = "Error - Right Door alert, status unknown."
+            self.lightvectormessage = "Error - Right Door alert, status unknown."
 
         if (status0 > 4) or (status1 > 4):
             # set commen alarm signal
             self.alarm = True
             if status0 == 5:
-                self.alarmtext = "Error - Left Door alert, OPEN limit switch has not closed"
+                self.lightvectormessage = "Error - Left Door alert, OPEN limit switch has not closed"
             if status0 == 6:
-                self.alarmtext = "Error - Left Door alert, CLOSED limit switch has not closed"
+                self.lightvectormessage = "Error - Left Door alert, CLOSED limit switch has not closed"
             if status0 == 7:
-                self.alarmtext = "Error - Left Door alert, both limit switches are closed"
+                self.lightvectormessage = "Error - Left Door alert, both limit switches are closed"
             if status1 == 5:
-                self.alarmtext = "Error - Right Door alert, OPEN limit switch has not closed"
+                self.lightvectormessage = "Error - Right Door alert, OPEN limit switch has not closed"
             if status1 == 6:
-                self.alarmtext = "Error - Right Door alert, CLOSED limit switch has not closed"
+                self.lightvectormessage = "Error - Right Door alert, CLOSED limit switch has not closed"
             if status1 == 7:
-                self.alarmtext = "Error - Right Door alert, both limit switches are closed"
+                self.lightvectormessage = "Error - Right Door alert, both limit switches are closed"
 
         if self.alarm:
             # On Error, always return CLOSED, to prevent telescope operation
@@ -552,12 +554,16 @@ class _DOOR:
 
         if status0 == 1:
             self._status = "OPEN"
+            self.lightvectormessage = "Door Open"
         elif status0 == 2:
             self._status = "OPENING"
+            self.lightvectormessage = "Door Opening"
         elif status0 == 3:
             self._status = "CLOSED"
+            self.lightvectormessage = "Door Closed"
         elif status0 == 4:
             self._status = "CLOSING"
+            self.lightvectormessage = "Door Closing"
         return self._status
 
 
