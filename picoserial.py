@@ -63,46 +63,13 @@ def receiver(ser, rconn):
         else:
             # it is door motor 0
             rconn.set('pico_roofdoor0', int.from_bytes([returnval[2]], 'big')  )
-    elif returnval[0] == 12:
-        # parameter values for door0
-        if (returnval[1] == 1):
-            # fast duration
-            rconn.set('pico_door0_fast_duration', int.from_bytes([returnval[2]], 'big')  )
-        if (returnval[1] == 2):
-            # duration
-            rconn.set('pico_door0_duration', int.from_bytes([returnval[2]], 'big')  )
-        if (returnval[1] == 3):
-            # max_running_time
-            rconn.set('pico_door0_max_running_time', int.from_bytes([returnval[2]], 'big')  )
-        if (returnval[1] == 4):
-            # maximum ratio
-            rconn.set('pico_door0_maximum', int.from_bytes([returnval[2]], 'big')  )
-        if (returnval[1] == 5):
-            # minimum ratio ratio
-            rconn.set('pico_door0_minimum', int.from_bytes([returnval[2]], 'big')  )
-    elif returnval[0] == 13:
-        # parameter values for door1
-        if (returnval[1] == 1):
-            # fast duration
-            rconn.set('pico_door1_fast_duration', int.from_bytes([returnval[2]], 'big')  )
-        if (returnval[1] == 2):
-            # duration
-            rconn.set('pico_door1_duration', int.from_bytes([returnval[2]], 'big')  )
-        if (returnval[1] == 3):
-            # max_running_time
-            rconn.set('pico_door1_max_running_time', int.from_bytes([returnval[2]], 'big')  )
-        if (returnval[1] == 4):
-            # maximum ratio
-            rconn.set('pico_door1_maximum', int.from_bytes([returnval[2]], 'big')  )
-        if (returnval[1] == 5):
-            # minimum ratio ratio
-            rconn.set('pico_door1_minimum', int.from_bytes([returnval[2]], 'big')  )
 
    
 
 
 def sender(data, ser, rconn):
     "Sends data via the serial port"
+    bincode = None
     if data == b'pico_led_On':
         # turns on led
         bincode = bytes([1, 25, 1, 255])  # send bytes to pico
@@ -141,83 +108,32 @@ def sender(data, ser, rconn):
     elif data == b'pico_roof1_close':
         bincode = bytes([8, 1, 1, 255])  # send request to close door1 to pico
 
-    elif data.startswith(b'pico_set_door0_fast_duration_'):
-        # value is the byte after the above string
-        value = int(data[29:])
-        # value is the number passed in the data bytes string
-        bincode = bytes([10, 1, value, 255])  # sends request to pico
-    elif data.startswith(b'pico_set_door0_duration_'):
-        # value is the byte after the above string
-        value = int(data[24:])
-        # value is the number passed in the data bytes string
-        bincode = bytes([10, 2, value, 255])  # sends request to pico
-    elif data.startswith(b'pico_set_door0_max_running_time_'):
-        # value is the byte after the above string
-        value = int(data[32:])
-        # value is the number passed in the data bytes string
-        bincode = bytes([10, 3, value, 255])  # sends request to pico
-    elif data.startswith(b'pico_set_door0_maximum_'):
-        # value is the byte after the above string
-        value = int(data[23:])
-        # value is the number passed in the data bytes string
-        bincode = bytes([10, 4, value, 255])  # sends request to pico
-    elif data.startswith(b'pico_set_door0_minimum_'):
-        # value is the byte after the above string
-        value = int(data[23:])
-        # value is the number passed in the data bytes string
-        bincode = bytes([10, 5, value, 255])  # sends request to pico
- 
-    elif data.startswith(b'pico_set_door1_fast_duration_'):
-        # value is the byte after the above string
-        value = int(data[29:])
-        # value is the number passed in the data bytes string
-        bincode = bytes([11, 1, value, 255])  # sends request to pico
-    elif data.startswith(b'pico_set_door1_duration_'):
-        # value is the byte after the above string
-        value = int(data[24:])
-        # value is the number passed in the data bytes string
-        bincode = bytes([11, 2, value, 255])  # sends request to pico
-    elif data.startswith(b'pico_set_door1_max_running_time_'):
-        # value is the byte after the above string
-        value = int(data[32:])
-        # value is the number passed in the data bytes string
-        bincode = bytes([11, 3, value, 255])  # sends request to pico
-    elif data.startswith(b'pico_set_door1_maximum_'):
-        # value is the byte after the above string
-        value = int(data[23:])
-        # value is the number passed in the data bytes string
-        bincode = bytes([11, 4, value, 255])  # sends request to pico
-    elif data.startswith(b'pico_set_door1_minimum_'):
-        # value is the byte after the above string
-        value = int(data[23:])
-        # value is the number passed in the data bytes string
-        bincode = bytes([11, 5, value, 255])  # sends request to pico
+    elif data.startswith(b'pico_door0_pwm_'):
+        # door pwm data of the form pico_door0_pwm_XX
+        pwm = int(data[15:])
+        bincode = bytes([16, 0, pwm, 255])  # send pwm to pico
+    elif data.startswith(b'pico_door1_pwm_'):
+        # door pwm data of the form pico_door1_pwm_XX
+        pwm = int(data[15:])
+        bincode = bytes([16, 1, pwm, 255])  # send pwm to pico
 
-    elif data.startswith(b'pico_get_door0_fast_duration'):
-        bincode = bytes([12, 1, 0, 255])
-    elif data.startswith(b'pico_get_door0_duration'):
-        bincode = bytes([12, 2, 0, 255])
-    elif data.startswith(b'pico_get_door0_max_running_time'):
-        bincode = bytes([12, 3, 0, 255])
-    elif data.startswith(b'pico_get_door0_maximum'):
-        bincode = bytes([12, 4, 0, 255])
-    elif data.startswith(b'pico_get_door0_minimum'):
-        bincode = bytes([12, 5, 0, 255])
-
-    elif data.startswith(b'pico_get_door1_fast_duration'):
-        bincode = bytes([13, 1, 0, 255])
-    elif data.startswith(b'pico_get_door1_duration'):
-        bincode = bytes([13, 2, 0, 255])
-    elif data.startswith(b'pico_get_door1_max_running_time'):
-        bincode = bytes([13, 3, 0, 255])
-    elif data.startswith(b'pico_get_door1_maximum'):
-        bincode = bytes([13, 4, 0, 255])
-    elif data.startswith(b'pico_get_door1_minimum'):
-        bincode = bytes([13, 5, 0, 255])
+    elif data == b'pico_door0_direction_1':
+        # door pwm direction
+        bincode = bytes([17, 0, 1, 255])  # send direction to pico
+    elif data == b'pico_door0_direction_0':
+        # door pwm direction
+        bincode = bytes([17, 0, 0, 255])  # send direction to pico
+    elif data == b'pico_door1_direction_1':
+        # door pwm direction
+        bincode = bytes([17, 1, 1, 255])  # send direction to pico
+    elif data == b'pico_door1_direction_0':
+        # door pwm direction
+        bincode = bytes([17, 1, 0, 255])  # send direction to pico
 
     else:
         return
-    ser.write(bincode)
+    if bincode:
+        ser.write(bincode)
 
 
 
