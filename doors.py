@@ -99,6 +99,7 @@ class Door:
         """Sends pwm values to the pico"""
         if not self.moving:
             # the door is not moving, nothing to do
+            self.slow = False
             return
         # door is moving, get pwm and send to pico
         running_time = monotonic() - self.start_running
@@ -110,7 +111,6 @@ class Door:
         if running_time >= self._max_running_time:
             self.pwm_ratio = 0
             self.moving = False
-            self.slow = False
             self.rconn.publish('tx_to_pico', f'pico_door{self.door}_pwm_0')
             return
 
