@@ -82,10 +82,8 @@ def driver():
     roof = shutter.Roof(device, leftdoor, rightdoor, lights, rconn, sender)
 
     # intiate a slow close, in case the pi resumes power with the door half open
-    leftdoor.slow = True
-    leftdoor.startdoor(False)  # False sets the direction to close
-    rightdoor.slow = True
-    rightdoor.startdoor(False)
+    leftdoor.startdoor(direction=False, slow=True)  # False sets the direction to close
+    rightdoor.startdoor(direction=False, slow=True)
 
     # now start eventloop to read and write to stdin, stdout
     loop = asyncio.get_event_loop()

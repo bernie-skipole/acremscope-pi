@@ -82,12 +82,13 @@ class Door:
         f.close()
 
 
-    def startdoor(self, direction):
+    def startdoor(self, direction, slow=False):
         # can only start if the door is not moving
         if self.moving:
             return
         self.start_running = monotonic()
         self.moving = True
+        self.slow = slow
         self.direction = direction
         if direction:
             self.rconn.publish('tx_to_pico', f'pico_door{self.door}_direction_1')
