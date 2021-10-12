@@ -48,12 +48,27 @@ class StatusLights:
         self.sender.append(ET.tostring(xmldata))
 
 
-    def respond(self):
+    def getvector(self, root):
         """Responds to a getProperties, sets defLightVector for the door in the sender deque.
            Returns None"""
-        xmldata = self.deflightvector()
-        # appends the xml data to be sent to the sender deque object
-        self.sender.append(ET.tostring(xmldata))
+        # check for valid request
+        device = root.get("device")
+        # device must be None (for all devices), or this device
+        if device is None:
+            # requesting all properties from all devices
+            xmldata = self.deflightvector()
+            # appends the xml data to be sent to the sender deque object
+            self.sender.append(ET.tostring(xmldata))
+            return
+        elif device != self.device:
+            # device specified, but not equal to this device
+            return
+
+        name = root.get("name")
+        if (name is None) or (name == self.name):
+            xmldata = self.deflightvector()
+            # appends the xml data to be sent to the sender deque object
+            self.sender.append(ET.tostring(xmldata))
 
 
     def deflightvector(self):

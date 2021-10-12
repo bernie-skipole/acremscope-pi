@@ -12,15 +12,14 @@ Consists of a switch vector,
 property name = DOME_SHUTTER
 elements = SHUTTER_OPEN, SHUTTER_CLOSE
 
-and a light vector which reports open, opening, closing, closed, consists of four
-elements
-
+and a light vector
 property name = DOOR_STATE
 with elements:
 OPEN
 OPENING
 CLOSING
 CLOSED
+UNKNOWN
 
 and two number vectors LEFT_DOOR RIGHT_DOOR, each with elements
 FAST_DURATION
@@ -28,8 +27,6 @@ DURATION
 MAX_RUNNING_TIME
 MAXIMUM
 MINIMUM
-
-If the actual state is none of these, ie unknown, then an alert is needed
 
 """
 
@@ -47,10 +44,10 @@ import doors, statuslights, shutter
 
 # All xml data received on the port from the client should be contained in one of the following tags
 TAGS = (b'getProperties',
-  #      b'newTextVector',
+        b'newTextVector',
         b'newNumberVector',
         b'newSwitchVector'
-  #      b'newBLOBVector'
+        b'newBLOBVector'
        )
 
 # _STARTTAGS is a tuple of ( b'<newTextVector', ...  ) data received will be tested to start with such a starttag
@@ -58,9 +55,6 @@ _STARTTAGS = tuple(b'<' + tag for tag in TAGS)
 
 # _ENDTAGS is a tuple of ( b'</newTextVector>', ...  ) data received will be tested to end with such an endtag
 _ENDTAGS = tuple(b'</' + tag + b'>' for tag in TAGS)
-
-_DEVICE = 'Roll off door'
-_NAME = 'DOME_SHUTTER'
 
 
 def driver():
@@ -74,12 +68,24 @@ def driver():
 
     # create classes which handle the hardware
 
-    leftdoor = doors.Door(_DEVICE, 0, rconn, sender)
-    rightdoor = doors.Door(_DEVICE, 1, rconn, sender)
+    device = 'Roll off door'
 
-    lights = statuslights.StatusLights(_DEVICE, leftdoor, rightdoor, rconn, sender)
+    leftdoor = doors.Door(device, 0, rconn, sender)
+    # If new door motion values have been set in a file, read them
+    leftdoor.read_parameters()
 
-    roof = shutter.Roof(_DEVICE, leftdoor, rightdoor, lights, rconn, sender)
+    rightdoor = doors.Door(device, 1, rconn, sender)
+    # If new door motion values have been set in a file, read them
+    rightdoor.read_parameters()
+
+    lights = statuslights.StatusLights(device, leftdoor, rightdoor, rconn, sender)
+    roof = shutter.Roof(device, leftdoor, rightdoor, lights, rconn, sender)
+
+    # intiate a slow close, in case the pi resumes power with the door half open
+    leftdoor.slow = True
+    leftdoor.startdoor(False)  # False sets the direction to close
+    rightdoor.slow = True
+    rightdoor.startdoor(False)
 
     # now start eventloop to read and write to stdin, stdout
     loop = asyncio.get_event_loop()
@@ -95,14 +101,11 @@ def driver():
 
 class _Driver:
 
-    def __init__(self, loop, sender, leftdoor, rightdoor, lights, roof):
+    def __init__(self, loop, sender, *items):
         "Sets the data used by the data handler"
         self.loop = loop
-        self.roof = roof
         self.sender = sender
-        self.leftdoor = leftdoor
-        self.rightdoor = rightdoor
-        self.lights = lights
+        self.items = items
 
     async def handle_data(self):
         """handle data via stdin and stdout"""
@@ -119,16 +122,11 @@ class _Driver:
 
 
     async def update(self):
-        """Runs contiuosly with .2 second breaks, updating any objects, which can in turn add xml to the sender"""
+        """Runs continuosly with .2 second breaks, updating any objects, which can in turn add xml to the sender"""
         while True:            
             await asyncio.sleep(0.2)
-            # roof switch
-            self.roof.update()
-            # update left and right doors 
-            self.leftdoor.update()
-            self.rightdoor.update()
-            # update lights vector
-            self.lights.update()
+            for item in self.items:
+                item.update()
 
     async def writer(self, writer):
         """Writes data in sender to stdout writer"""
@@ -203,59 +201,15 @@ class _Driver:
     def respond(self, root):
         "Respond to received xml, as set in root"
         if root.tag == "getProperties":
-            # expecting something like
-            # <getProperties version="1.7" />
-            # or
-            # <getProperties version="1.7" device="Roll off door" />
-            # or
-            # <getProperties version="1.7" device="Roll off door" name="DOME_SHUTTER" />
-            # or
-            # <getProperties version="1.7" device="Roll off door" name="DOOR_STATE" />
-            # or
-            # <getProperties version="1.7" device="Roll off door" name="LEFT_DOOR" />
-            # or
-            # <getProperties version="1.7" device="Roll off door" name="RIGHT_DOOR" />
-
             version = root.get("version")
             if version != "1.7":
                 return
-            # check for valid request
-            device = root.get("device")
-            # device must be None (for all devices), or 'Roll off door' which is this device
-            if device is None:
-                # and sets xml into the sender deque
-                self.roof.respond()
-                self.leftdoor.respond()
-                self.rightdoor.respond()
-                self.lights.respond()
-            elif device == _DEVICE:
-                name = root.get("name")
-                if name is None:
-                    # all properties
-                    self.roof.respond()
-                    self.leftdoor.respond()
-                    self.rightdoor.respond()
-                    self.lights.respond()
-                elif name == self.lights.name:  # the door OPEN, CLOSING, OPENING, CLOSED LightVector
-                    self.lights.respond()
-                elif name == self.roof.name:  # DOME_SHUTTER
-                    self.roof.respond()
-                elif name == self.leftdoor.name:
-                    self.leftdoor.respond()
-                elif name == self.rightdoor.name:
-                    self.rightdoor.respond()
-
-        elif root.tag == "newSwitchVector":
-            # the client is requesting a door open/shut
-            # expecting something like
-            # <newSwitchVector device="Roll off door" name="DOME_SHUTTER">
-            #   <oneSwitch name="SHUTTER_OPEN">On</oneSwitch>
-            # </newSwitchVector>
-            self.roof.newvector(root)
-
-        elif root.tag == "newNumberVector":
-            self.leftdoor.newvector(root)
-            self.rightdoor.newvector(root)
+            for item in self.items:
+                item.getvector(root)
+        else:
+            # root.tag will be either newSwitchVector, newNumberVector,.. etc, one of the tags in TAGS
+            for item in self.items:
+                item.newvector(root)
 
 
 

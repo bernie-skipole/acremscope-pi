@@ -44,8 +44,8 @@ class Door:
         # these will be stored in a file
         self.filename = os.path.join("/home/bernard/indi", self.name)
 
-        # If new values have been set in a file, read them
-        self.read_parameters()
+        # If slow is True, this temporarily sets self._maximum to low, to self._minimum+1
+        self.slow = False
 
 
     @property
@@ -106,9 +106,11 @@ class Door:
         pwm = 0
         
         # If the running time is greater than max allowed, stop the motor
+        # and set self.slow to False, so it has to be set to True again to initiate a slow down
         if running_time >= self._max_running_time:
             self.pwm_ratio = 0
             self.moving = False
+            self.slow = False
             self.rconn.publish('tx_to_pico', f'pico_door{self.door}_pwm_0')
             return
 
@@ -119,12 +121,15 @@ class Door:
         # change to integer between 0 and 100
         # and reduce the value so instead of 100 the maximum ratio is given
 
+        # max_ratio is normally self._maximum but can be self._minimum+1 if self.slow is True
+        max_ratio = self._minimum+1 if self.slow else self._maximum          
+
         if running_time<self._duration/2.0:
-            # the start up, scale everything by self._maximum, so 1 becomes self._maximum
-            pwm = pwm*self._maximum
+            # the start up, scale everything by max_ratio, so 1 becomes max_ratio
+            pwm = pwm*max_ratio
         else:
-            # the slow-down, scale 1 to be self._maximum, zero to be self.minimum
-            m = self._maximum-self._minimum
+            # the slow-down, scale 1 to be max_ratio, zero to be self.minimum
+            m = max_ratio-self._minimum
             pwm = m*pwm + self._minimum
 
             # pwm = 1,     (max-min) + min  -> max
@@ -142,12 +147,28 @@ class Door:
 
 
 
-    def respond(self):
+    def getvector(self, root):
         """Responds to a getProperties, sets defNumberVector for the door in the sender deque.
            Returns None"""
-        xmldata = self.defnumbervector()
-        # appends the xml data to be sent to the sender deque object
-        self.sender.append(ET.tostring(xmldata))
+        # check for valid request
+        device = root.get("device")
+        # device must be None (for all devices), or this device
+        if device is None:
+            # requesting all properties from all devices
+            xmldata = self.defnumbervector()
+            # appends the xml data to be sent to the sender deque object
+            self.sender.append(ET.tostring(xmldata))
+            return
+        elif device != self.device:
+            # device specified, but not equal to this device
+            return
+
+        name = root.get("name")
+        if (name is None) or (name == self.name):
+            xmldata = self.defnumbervector()
+            # appends the xml data to be sent to the sender deque object
+            self.sender.append(ET.tostring(xmldata))
+
 
 
     def defnumbervector(self):

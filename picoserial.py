@@ -55,15 +55,6 @@ def receiver(ser, rconn):
         # Temperature, as a two byte a to d conversion, save to redis as integer
         value = int.from_bytes( [returnval[1], returnval[2]], 'big')
         rconn.set('pico_temperature', value)
-    elif returnval[0] == 7:
-        # the status code of the door, save to redis as integer
-        if (returnval[1] == 1):
-            # it is door motor 1
-            rconn.set('pico_roofdoor1', int.from_bytes([returnval[2]], 'big')  )
-        else:
-            # it is door motor 0
-            rconn.set('pico_roofdoor0', int.from_bytes([returnval[2]], 'big')  )
-
    
 
 
@@ -88,25 +79,7 @@ def sender(data, ser, rconn):
         bincode = bytes([3, 0, count, 255])  # send monitor request to pico
     elif data == b'pico_temperature':
         bincode = bytes([5, 4, 0, 255])  # send temperature request to pico
-    elif data == b'pico_roof':
-        # ask for roof status
-        bincode = bytes([6, 1, 0, 255])  # send request for status for door number 0
-        ser.write(bincode)
-        bincode = bytes([6, 1, 1, 255])  # send request for status for door number 1
-    # the following opens/closes both doors
-    elif data == b'pico_roof_open':
-        bincode = bytes([9, 0, 0, 255])  # send request to open both doors to pico
-    elif data == b'pico_roof_close':
-        bincode = bytes([9, 0, 1, 255])  # send request to close both doors to pico
-    # the following allows control of individual roof doors - not used in normal operation
-    elif data == b'pico_roof0_open':
-        bincode = bytes([8, 0, 0, 255])  # send request to open door 0 to pico
-    elif data == b'pico_roof0_close':
-        bincode = bytes([8, 0, 1, 255])  # send request to close door 0 to pico
-    elif data == b'pico_roof1_open':
-        bincode = bytes([8, 1, 0, 255])  # send request to open door 1 to pico
-    elif data == b'pico_roof1_close':
-        bincode = bytes([8, 1, 1, 255])  # send request to close door1 to pico
+
 
     elif data.startswith(b'pico_door0_pwm_'):
         # door pwm data of the form pico_door0_pwm_XX
