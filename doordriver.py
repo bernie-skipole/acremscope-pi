@@ -63,7 +63,7 @@ def driver():
     # create a redis connection
     rconn = redis.StrictRedis(host='localhost', port=6379, db=0)
 
-    # create a deque, data to be sent to indiderver is appended to this
+    # create a deque, data to be sent to indiserver is appended to this
     sender = collections.deque(maxlen=100)
 
     # create classes which handle the hardware
@@ -134,7 +134,7 @@ class _Driver:
                 writer.write(self.sender.popleft() + b"\n")
             else:
                 # no message to send, do an async pause
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.2)
 
 
     async def reader(self, reader):
