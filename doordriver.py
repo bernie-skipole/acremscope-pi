@@ -46,7 +46,7 @@ import doors, statuslights, shutter
 TAGS = (b'getProperties',
         b'newTextVector',
         b'newNumberVector',
-        b'newSwitchVector'
+        b'newSwitchVector',
         b'newBLOBVector'
        )
 
