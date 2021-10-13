@@ -100,6 +100,7 @@ class Door:
         """Sends pwm values to the pico"""
         if not self.moving:
             # the door is not moving, nothing to do
+            # and set self.slow to False, so it has to be set to True again to initiate a slow down
             self.slow = False
             return
         # door is moving, get pwm and send to pico
@@ -108,7 +109,6 @@ class Door:
         pwm = 0
         
         # If the running time is greater than max allowed, stop the motor
-        # and set self.slow to False, so it has to be set to True again to initiate a slow down
         if running_time >= self._max_running_time:
             self.pwm_ratio = 0
             self.moving = False
