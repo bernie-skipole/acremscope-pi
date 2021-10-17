@@ -6,6 +6,13 @@
 Sends a text message every ten seconds, client can check its timestamp, and if
 longer than, say 15 seconds, then the connection can be presumed down
 
+
+
+ DEVICE = 'Network Monitor'
+ NAME = 'TenSecondHeartbeat'
+ ELEMENT = 'KeepAlive'
+
+
 """
 
 import os, sys, collections, asyncio
@@ -16,10 +23,10 @@ from datetime import datetime
 
 # All xml data received on the port from the client should be contained in one of the following tags
 TAGS = (b'getProperties',
-  #      b'newTextVector',
-  #      b'newNumberVector',
-  #      b'newSwitchVector',
-  #      b'newBLOBVector'
+        b'newTextVector',
+        b'newNumberVector',
+        b'newSwitchVector',
+        b'newBLOBVector'
        )
 
 # _STARTTAGS is a tuple of ( b'<newTextVector', ...  ) data received will be tested to start with such a starttag
@@ -29,18 +36,24 @@ _STARTTAGS = tuple(b'<' + tag for tag in TAGS)
 _ENDTAGS = tuple(b'</' + tag + b'>' for tag in TAGS)
 
 
-_DEVICE = 'Network Monitor'
-_NAME = 'TenSecondHeartbeat'
-_ELEMENT = 'KeepAlive'
-
 
 def driver():
     "Blocking call"
 
+    # redis connection not used in this case
+    rconn = None
+
+    # create a deque, data to be sent to indiserver is appended to this
+    sender = collections.deque(maxlen=100)
+
+    # create classes which handle the hardware
+
+    netmonitor = NetMonitor('Network Monitor', rconn, sender)
+
     # now start eventloop to read and write to stdin, stdout
     loop = asyncio.get_event_loop()
 
-    connections = _MONITOR(loop)
+    connections = _Driver(loop, sender, netmonitor)
 
     while True:
         try:
@@ -49,13 +62,13 @@ def driver():
             loop.close()
 
 
-class _MONITOR:
+class _Driver:
 
-    def __init__(self, loop):
+    def __init__(self, loop, sender, *items):
         "Sets the data used by the data handler"
         self.loop = loop
-        self.sender = collections.deque(maxlen=5)
-
+        self.sender = sender
+        self.items = items
 
     async def handle_data(self):
         """handle data via stdin and stdout"""
@@ -68,8 +81,19 @@ class _MONITOR:
                                                        sys.stdout)
         writer = asyncio.StreamWriter(writer_transport, writer_protocol, None, self.loop)
 
-        await asyncio.gather(self.reader(reader), self.writer(writer), self.update())
+        # list of item update methods, each of which should be an awaitable
+        itemlist = list(item.update() for item in self.items)
+        await asyncio.gather(self.reader(reader), self.writer(writer), *itemlist)
 
+        # await asyncio.gather(self.reader(reader), self.writer(writer), self.update())
+
+
+#    async def update(self):
+#        """Runs continuosly with .2 second breaks, updating any objects, which can in turn add xml to the sender"""
+#        while True:            
+#            await asyncio.sleep(0.2)
+#            for item in self.items:
+#                item.update()
 
     async def writer(self, writer):
         """Writes data in sender to stdout writer"""
@@ -79,21 +103,11 @@ class _MONITOR:
                 writer.write(self.sender.popleft() + b"\n")
             else:
                 # no message to send, do an async pause
-                await asyncio.sleep(0.5)
-
-
-    async def update(self):
-        """Writes data every ten seconds to sender """
-        while True:
-            await asyncio.sleep(10)
-            # and update self.sender with a setTextVector
-            self.setTextVector()
+                await asyncio.sleep(0.2)
 
 
     async def reader(self, reader):
-        """Reads data from stdin reader which is the input stream of the driver
-           if a getProperties is received (only entry in TAGS), then puts a
-           defTextVector into self.sender"""
+        """Reads data from stdin reader which is the input stream of the driver"""
         # get received data, and put it into message
         message = b''
         messagetagnumber = None
@@ -119,7 +133,6 @@ class _MONITOR:
                 # either further children of this tag are coming, or maybe its a single tag ending in "/>"
                 if message.endswith(b'/>'):
                     # the message is complete, handle message here
-                    # Run 'fromindi.receive_from_indiserver' in the default loop's executor:
                     try:
                         root = ET.fromstring(message.decode("utf-8"))
                     except Exception:
@@ -127,9 +140,8 @@ class _MONITOR:
                         message = b''
                         messagetagnumber = None
                         continue
-                    # and sets xml into the sender deque
-                    self.deftextvector(root)
-
+                    # respond to the received xml ############
+                    self.respond(root)
                     # and start again, waiting for a new message
                     message = b''
                     messagetagnumber = None
@@ -140,7 +152,6 @@ class _MONITOR:
             message += data
             if message.endswith(_ENDTAGS[messagetagnumber]):
                 # the message is complete, handle message here
-                # Run 'fromindi.receive_from_indiserver' in the default loop's executor:
                 try:
                     root = ET.fromstring(message.decode("utf-8"))
                 except Exception:
@@ -148,83 +159,116 @@ class _MONITOR:
                     message = b''
                     messagetagnumber = None
                     continue
-                # and sets xml into the sender deque
-                self.deftextvector(root)
-
+                # respond to the received xml ############
+                self.respond(root)
                 # and start again, waiting for a new message
                 message = b''
                 messagetagnumber = None
 
-    def deftextvector(self, root):
-        """Responds to a getProperties, and sets message defTextVector in the sender deque.
-           Returns None"""
-
+    def respond(self, root):
+        "Respond to received xml, as set in root"
         if root.tag == "getProperties":
-
-            # expecting something like
-            # <getProperties version="1.7" device="Network Monitor" name="TenSecondHeartbeat" />
-
             version = root.get("version")
             if version != "1.7":
                 return
-
-            device = root.get("device")
-            # device must be None (for all devices), or value of _DEVICE
-            if (not (device is None)) and (device != _DEVICE):
-                # not a recognised device
-                return
-
-            name = root.get("name")
-            # name must be None (for all properties), or value of _NAME which is the only property
-            # of this device
-            if (not (name is None)) and (name != _NAME):
-                # not a recognised property
-                return
-
-            # create the responce
-            xmldata = ET.Element('defTextVector')
-            xmldata.set("device", _DEVICE)
-            xmldata.set("name", _NAME)
-            xmldata.set("label", "Ten second keep-alive")
-            xmldata.set("group", "Status")
-            xmldata.set("state", "Ok")
-            xmldata.set("perm", "ro")
-            timestamp = datetime.utcnow().isoformat(sep='T')
-            xmldata.set("timestamp", timestamp)
-
-            te = ET.Element('defText')
-            te.set("name", _ELEMENT)
-            te.set("label", "Message")
-            te.text = f"{timestamp}: Keep-alive message from {_DEVICE}"
-            xmldata.append(te)
+            for item in self.items:
+                item.getvector(root)
         else:
-            # tag not recognised, do not add anything to sender
+            # root.tag will be either newSwitchVector, newNumberVector,.. etc, one of the tags in TAGS
+            for item in self.items:
+                item.newvector(root)
+
+
+class NetMonitor:
+
+    def __init__(self, device, rconn, sender):
+        "Sends the monitor texts"
+        self.device = device
+        self.name = 'TenSecondHeartbeat'
+        self.rconn = rconn
+        self.sender = sender
+
+
+    async def update(self):
+        "Send message every 10 seconds"
+        while True:
+            await asyncio.sleep(10)          
+            xmldata = self.settextvector()
+            self.sender.append(ET.tostring(xmldata))
+
+
+    def getvector(self, root):
+        """Responds to a getProperties, sets defTextVector into sender dequeue"""
+        # check for valid request
+        device = root.get("device")
+        # device must be None (for all devices), or this device
+        if device is None:
+            # requesting all properties from all devices
+            xmldata = self.deftextvector()
+            # appends the xml data to be sent to the sender deque object
+            self.sender.append(ET.tostring(xmldata))
+            return
+        elif device != self.device:
+            # device specified, but not equal to this device
             return
 
-        # appends the xml data to be sent to the sender deque object
-        self.sender.append(ET.tostring(xmldata))
+        name = root.get("name")
+        if (name is None) or (name == self.name):
+            xmldata = self.deftextvector()
+            # appends the xml data to be sent to the sender deque object
+            self.sender.append(ET.tostring(xmldata))
+
+
+
+    def deftextvector(self):
+        """Responds to a getProperties, and sets message defTextVector in the sender deque.
+           Returns None"""
+
+        # note - limit timestamp characters to :21 to avoid long fractions of a second 
+        timestamp = datetime.utcnow().isoformat(sep='T')[:21]
+
+        # create the responce
+        xmldata = ET.Element('defTextVector')
+        xmldata.set("device", self.device)
+        xmldata.set("name", self.name)
+        xmldata.set("label", "Ten second keep-alive")
+        xmldata.set("group", "Status")
+        xmldata.set("state", "Ok")
+        xmldata.set("perm", "ro")
+        xmldata.set("timestamp", timestamp)
+
+        te = ET.Element('defText')
+        te.set("name", 'KeepAlive')
+        te.set("label", "Message")
+        te.text = f"{timestamp}: Keep-alive message from {self.device}"
+        xmldata.append(te)
+        return xmldata
+
+
+    def newvector(self, root):
+        "monitor is read only, so does not accept a new Vector"
         return
 
 
-    def setTextVector(self):
+    def settextvector(self):
         """Appends setTextVector in the sender deque."""
+
+        timestamp = datetime.utcnow().isoformat(sep='T')[:21]
 
         # create the setTextVector
         xmldata = ET.Element('setTextVector')
-        xmldata.set("device", _DEVICE)
-        xmldata.set("name", _NAME)
-        timestamp = datetime.utcnow().isoformat(sep='T')
+        xmldata.set("device", self.device)
+        xmldata.set("name", self.name)
+
         xmldata.set("timestamp", timestamp)
         xmldata.set("message", "Sent every 10 seconds, an older timestamp indicates connection failure")
 
         te = ET.Element('oneText')
-        te.set("name", _ELEMENT)
-        te.text = f"{timestamp}: Keep-alive message from {_DEVICE}"
+        te.set("name", 'KeepAlive')
+        te.text = f"{timestamp}: Keep-alive message from {self.device}"
         xmldata.append(te)
 
-        # appends the xml data to be sent to the sender deque object
-        self.sender.append(ET.tostring(xmldata))
-        return
+        return xmldata
 
 
 
@@ -232,4 +276,5 @@ if __name__=="__main__":
 
     # start this blocking call
     driver()
+
 
