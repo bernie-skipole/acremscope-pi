@@ -99,15 +99,6 @@ class _Driver:
         itemlist = list(item.update() for item in self.items)
         await asyncio.gather(self.reader(reader), self.writer(writer), *itemlist)
 
-        # await asyncio.gather(self.reader(reader), self.writer(writer), self.update())
-
-
-#    async def update(self):
-#        """Runs continuosly with .2 second breaks, updating any objects, which can in turn add xml to the sender"""
-#        while True:            
-#            await asyncio.sleep(0.2)
-#            for item in self.items:
-#                item.update()
 
     async def writer(self, writer):
         """Writes data in sender to stdout writer"""
