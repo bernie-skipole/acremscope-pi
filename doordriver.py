@@ -23,9 +23,10 @@ UNKNOWN
 
 and two number vectors LEFT_DOOR RIGHT_DOOR,
 each with elements:
+ACC_DURATION
 FAST_DURATION
-DURATION
-MAX_RUNNING_TIME
+DEC_DURATION
+SLOW_DURATION
 MAXIMUM
 MINIMUM
 
@@ -606,9 +607,10 @@ class StatusLights:
 ######### Door objects
 #
 # these are numbervectors with elements
+# ACC_DURATION
 # FAST_DURATION
-# DURATION
-# MAX_RUNNING_TIME
+# DEC_DURATION
+# SLOW_DURATION
 # MAXIMUM
 # MINIMUM
 #
@@ -643,9 +645,10 @@ class Door:
         self.start_running = 0
         
         # Set these parameters to default
+        self._acc_duration = 2
         self._fast_duration = 4
-        self._duration = 8
-        self._max_running_time = 10
+        self._dec_duration = 2
+        self._slow_duration = 2
         self._maximum = 95
         self._minimum = 5
 
@@ -653,15 +656,16 @@ class Door:
         # as this python file
         self.filename = os.path.join(os.path.dirname(os.path.realpath(__file__)), self.name)
 
-        # If slow is True, this temporarily sets self._maximum to low, to self._minimum+1
+        # If slow is True, this temporarily sets maximum speed to self._minimum+1
         self.slow = False
 
 
     @property
     def elements(self):
-        return [ str(self._fast_duration),
-                 str(self._duration),
-                 str(self._max_running_time),
+        return [ str(self._acc_duration),
+                 str(self._fast_duration),
+                 str(self._dec_duration),
+                 str(self._slow_duration),
                  str(self._maximum),
                  str(self._minimum) ]
 
@@ -673,14 +677,15 @@ class Door:
         f = open(self.filename, "r")
         parameter_strings = f.readlines()
         f.close()
-        if len(parameter_strings) != 5:
+        if len(parameter_strings) != 6:
             return
         parameter_list = [ int(p.strip()) for p in parameter_strings]
-        self._fast_duration = parameter_list[0]
-        self._duration = parameter_list[1]
-        self._max_running_time = parameter_list[2]
-        self._maximum = parameter_list[3]
-        self._minimum = parameter_list[4]
+        self._acc_duration = parameter_list[0]
+        self._fast_duration = parameter_list[1]
+        self._dec_duration = parameter_list[2]
+        self._slow_duration = parameter_list[3]
+        self._maximum = parameter_list[4]
+        self._minimum = parameter_list[5]
 
     def write_parameters(self):
         """Saves the parameters to a file"""
@@ -720,40 +725,37 @@ class Door:
             pwm = 0
             
             # If the running time is greater than max allowed, stop the motor
-            if running_time >= self._max_running_time:
+            max_running_time = self._acc_duration + self._fast_duration + self._dec_duration + self._slow_duration
+            if running_time >= max_running_time:
                 self.pwm_ratio = 0
                 self.moving = False
                 self.rconn.publish('tx_to_pico', f'pico_door{self.door}_pwm_0')
                 continue
 
             # door is opening or closing, get the pwm ratio
-            pwm = pwmratio(running_time, self._fast_duration, self._duration)
-
-            # pwm is a number between 0 and 1,
-            # change to integer between 0 and 100
-            # and reduce the value so instead of 100 the maximum ratio is given
-
-            # max_ratio is normally self._maximum but can be self._minimum+1 if self.slow is True
-            max_ratio = self._minimum+1 if self.slow else self._maximum          
-
-            if running_time<self._duration/2.0:
-                # the start up, scale everything by max_ratio, so 1 becomes max_ratio
-                pwm = pwm*max_ratio
+            if self.slow:
+                pwm = curve(running_time, self._acc_duration,
+                                          self._fast_duration,
+                                          self._dec_duration,
+                                          self._slow_duration,
+                                          self._minimum + 1,
+                                          self._minimum)
             else:
-                # the slow-down, scale 1 to be max_ratio, zero to be self.minimum
-                m = max_ratio-self._minimum
-                pwm = m*pwm + self._minimum
+                pwm = curve(running_time, self._acc_duration,
+                                          self._fast_duration,
+                                          self._dec_duration,
+                                          self._slow_duration,
+                                          self._maximum,
+                                          self._minimum)
 
-                # pwm = 1,     (max-min) + min  -> max
-                # pwm = 0.5,   (max-min) * 0.5 + min  -> 0.5max + 0.5min = (max+min) / 2
-                # pwm = 0,     -> min
-
+            # pwm is a number between 0 and self._maximum, #########################
             pwm = int(pwm)
             # has this changed from previous?
             if pwm != self.pwm_ratio:
                 # yes it has changed, so send this to the pico, and store new value in self.pwm_ratio
                 self.pwm_ratio = pwm
                 self.rconn.publish('tx_to_pico', f'pico_door{self.door}_pwm_{pwm}')
+
 
     def getvector(self, root):
         """Responds to a getProperties, sets defNumberVector for the door in the sender deque.
@@ -794,38 +796,50 @@ class Door:
         xmldata.set("perm", "rw")
         xmldata.set("timestamp", timestamp)
 
+
+        #ACC_DURATION
+        ad = ET.Element('defNumber')
+        ad.set("name", 'ACC_DURATION')
+        ad.set("label", 'Duration of acceleration (seconds)')
+        ad.set("format", "%2d")
+        ad.set("min", "1")
+        ad.set("max", "20")   # min== max means ignore
+        ad.set("step", "1")    # 0 means ignore
+        ad.text = str(self._acc_duration)
+        xmldata.append(ad)
+
         #FAST_DURATION
         fd = ET.Element('defNumber')
         fd.set("name", 'FAST_DURATION')
         fd.set("label", 'Duration of maximum speed (seconds)')
         fd.set("format", "%2d")
         fd.set("min", "1")
-        fd.set("max", "238")   # min== max means ignore
+        fd.set("max", "30")   # min== max means ignore
         fd.set("step", "1")    # 0 means ignore
         fd.text = str(self._fast_duration)
         xmldata.append(fd)
 
-        #DURATION
-        du = ET.Element('defNumber')
-        du.set("name", 'DURATION')
-        du.set("label", 'Duration of travel between limit switches (seconds)')
-        du.set("format", "%2d")
-        du.set("min", "2")
-        du.set("max", "239")   # min== max means ignore
-        du.set("step", "1")    # 0 means ignore
-        du.text = str(self._duration)
-        xmldata.append(du)
-     
-        #MAX_RUNNING_TIME
-        mrt = ET.Element('defNumber')
-        mrt.set("name", 'MAX_RUNNING_TIME')
-        mrt.set("label", 'Maximum running time to cut out if limit switches fail (seconds)')
-        mrt.set("format", "%2d")
-        mrt.set("min", "3")
-        mrt.set("max", "240")   # min== max means ignore
-        mrt.set("step", "1")    # 0 means ignore
-        mrt.text = str(self._max_running_time)
-        xmldata.append(mrt)
+        #DEC_DURATION
+        dd = ET.Element('defNumber')
+        dd.set("name", 'DEC_DURATION')
+        dd.set("label", 'Duration of deceleration (seconds)')
+        dd.set("format", "%2d")
+        dd.set("min", "1")
+        dd.set("max", "20")   # min== max means ignore
+        dd.set("step", "1")    # 0 means ignore
+        dd.text = str(self._dec_duration)
+        xmldata.append(dd)
+
+        #SLOW_DURATION
+        sd = ET.Element('defNumber')
+        sd.set("name", 'SLOW_DURATION')
+        sd.set("label", 'Duration of low speed after deceleration (seconds)')
+        sd.set("format", "%2d")
+        sd.set("min", "1")
+        sd.set("max", "30")   # min== max means ignore
+        sd.set("step", "1")    # 0 means ignore
+        sd.text = str(self._slow_duration)
+        xmldata.append(sd)
 
         #MAXIMUM
         mx = ET.Element('defNumber')
@@ -872,36 +886,43 @@ class Door:
 
         int_elements = [ int(e.strip()) for e in elements ]
 
-        if int_elements[0] != self._fast_duration:
-            self._fast_duration = int_elements[0]
+        if int_elements[0] != self._acc_duration:
+            self._acc_duration = int_elements[0]
+            ad = ET.Element('oneNumber')
+            ad.set("name", 'ACC_DURATION')
+            ad.text = str(self._acc_duration)
+            xmldata.append(ad)
+
+        if int_elements[1] != self._fast_duration:
+            self._fast_duration = int_elements[1]
             fd = ET.Element('oneNumber')
             fd.set("name", 'FAST_DURATION')
             fd.text = str(self._fast_duration)
             xmldata.append(fd)
 
-        if int_elements[1] != self._duration:
-            self._duration = int_elements[1]
-            du = ET.Element('oneNumber')
-            du.set("name", 'DURATION')
-            du.text = str(self._duration)
-            xmldata.append(du)
+        if int_elements[2] != self._dec_duration:
+            self._dec_duration = int_elements[2]
+            dd = ET.Element('oneNumber')
+            dd.set("name", 'DEC_DURATION')
+            dd.text = str(self._dec_duration)
+            xmldata.append(dd)
 
-        if int_elements[2] != self._max_running_time:
-            self._max_running_time = int_elements[2]
-            mrt = ET.Element('oneNumber')
-            mrt.set("name", 'MAX_RUNNING_TIME')
-            mrt.text = str(self._max_running_time)
-            xmldata.append(mrt)
+        if int_elements[3] != self._slow_duration:
+            self._slow_duration = int_elements[3]
+            sd = ET.Element('oneNumber')
+            sd.set("name", 'SLOW_DURATION')
+            sd.text = str(self._slow_duration)
+            xmldata.append(sd)
 
-        if int_elements[3] != self._maximum:
-            self._maximum = int_elements[3]
+        if int_elements[4] != self._maximum:
+            self._maximum = int_elements[4]
             mx = ET.Element('oneNumber')
             mx.set("name", 'MAXIMUM')
             mx.text = str(self._maximum)
             xmldata.append(mx)
 
-        if int_elements[4] != self._minimum:
-            self._minimum = int_elements[4]
+        if int_elements[5] != self._minimum:
+            self._minimum = int_elements[5]
             mn = ET.Element('oneNumber')
             mn.set("name", 'MINIMUM')
             mn.text = str(self._minimum)
@@ -931,16 +952,18 @@ class Door:
             # oneNumber element name
             numname = item.get("name")
             # get the number, remove newlines
-            if numname == 'FAST_DURATION':
+            if numname == 'ACC_DURATION':
                 newelements[0] = item.text.strip()
-            elif numname == 'DURATION':
+            elif numname == 'FAST_DURATION':
                 newelements[1] = item.text.strip()
-            elif numname == 'MAX_RUNNING_TIME':
+            elif numname == 'DEC_DURATION':
                 newelements[2] = item.text.strip()
-            elif numname == 'MAXIMUM':
+            elif numname == 'SLOW_DURATION':
                 newelements[3] = item.text.strip()
-            elif numname == 'MINIMUM':
+            elif numname == 'MAXIMUM':
                 newelements[4] = item.text.strip()
+            elif numname == 'MINIMUM':
+                newelements[5] = item.text.strip()
 
         # check newelements received
 
@@ -950,23 +973,28 @@ class Door:
             self.sender.append(ET.tostring(xmldata))
             return
 
-
-        # if not ok, send a setnumbervector with alert, message
+        # check received values ok, if not, send a setnumbervector with alert, message
         # and with current self.elements, indicting no change to elements
-        intelements = [int(i) for i in newelements]
+        receivedmax = int(newelements[4])
+        receivedmin = int(newelements[5])
 
-        if intelements[0] >= intelements[1]:
-            xmldata = self.setnumbervector(self.elements, state="Alert", message="High speed duration must be shorter than the duration of travel")
-            self.sender.append(ET.tostring(xmldata))
-            return
-
-        if intelements[1] >= intelements[2]:
-            xmldata = self.setnumbervector(self.elements, state="Alert", message="The maximum running time must be longer than the duration of travel")
-            self.sender.append(ET.tostring(xmldata))
-            return
-
-        if intelements[4] >= intelements[3]:
+        if receivedmin >= receivedmax:
             xmldata = self.setnumbervector(self.elements, state="Alert", message="The maximum pwm must be greater than the minimum")
+            self.sender.append(ET.tostring(xmldata))
+            return
+
+        if receivedmax > 95:
+            xmldata = self.setnumbervector(self.elements, state="Alert", message="The maximum pwm is 95 max")
+            self.sender.append(ET.tostring(xmldata))
+            return
+
+        if receivedmin > 50:
+            xmldata = self.setnumbervector(self.elements, state="Alert", message="The minimum pwm is 50 max")
+            self.sender.append(ET.tostring(xmldata))
+            return
+
+        if receivedmin < 1:
+            xmldata = self.setnumbervector(self.elements, state="Alert", message="The minimum pwm is 1")
             self.sender.append(ET.tostring(xmldata))
             return
 
@@ -977,70 +1005,70 @@ class Door:
 
 
 
-########### door motion control functions
-#
-# these control the pwm ratio of the motors
-# giving an acceleration curve against time
+def curve(t, acc_t, fast_t, dec_t, slow_t, fast, slow):
+    """Returns a speed value between 0 and fast for a given t
+       t is the time (a float in seconds), from zero at which point acceleration starts
+       typically t would be incrementing in real time as the door is opening/closing
+       acc_t is the acceleration time, after which the 'fast' speed is reached
+       fast_t is the time spent at the fast speed
+       dec_t is the time spent decelarating from fast to slow
+       slow_t is the time then spent running at 'slow' speed.
+       after acc_t + fast_t + dec_t + slow_t, 0.0 is returned
 
+       fast is the fast speed, provide a float
+       slow is the slow speed, provide a float, this is the slow door speed which typically
+       would take the door to a limit stop switch."""
 
-def pwmratio(t, fast_duration, duration):
-    """Returns a value between 0 and 1 for a given t
-       duration is the duration of the perod, after which the value returned is 0.0
-       fast_duration is the period where the value returned will be 1
-       for example, if duration is 60, and fast_duration is 40, then the ratio will climb from 0 to 1
-       given a t of 0-10, then 1 for 10-50, and finally, ramp down to 0 for 50-60
-       and beyond 60 will stay at 0"""
+    assert fast > slow
 
-    if t >= duration:
+    duration = acc_t + fast_t + dec_t
+
+    full_duration = duration + slow_t
+
+    if t >= full_duration:
         return 0.0
-    if fast_duration >= duration:
-        if t < duration:
-            return 1.0
-    # so t is less than duration
-    # scale t and duration
-    acc_time = (duration - fast_duration)/2.0
-    scale = 8.0/acc_time
-    # the value of 8.0 is used as the following call to curve
-    # is set with an acceleration time of 8
-    # The curve function returns a pwm ration beteen 0 and 1
-    return curve(t*scale, duration*scale)
-
-
-
-def curve(t, duration):
-    """Returns a value between 0 and 1.0 for a given t
-       with an eight second acceleration and deceleration
-       For t from 0 to 8 increases from 0 up to 1.0
-       For t from duration-8 to duration decreases to 0
-       For t beyond duration, returns 0"""
-
     if t >= duration:
-        return 0
+        return slow
 
-    half = duration/2.0
-    if t<=half:
-        # for the first half of duration, increasing speed to a maximum of 1.0 after 8 seconds
-        if t>8.0:
-            return 1.0
-    else:
-        # for the second half of duration, decreasing speed to zero when there are 8 seconds left
-        if duration-t>8.0:
-            return 1.0
-        t = 20 - (duration-t)
+    # this list must have nine elements describing an acceleration curve from 0.0 to 1.0
+    c = [0.0, 0.05, 0.15, 0.3, 0.5, 0.7, 0.85, 0.95, 1.0]
 
-    # This curve is a fit increasing to 1 (or at least near to 1) with t from 0 to 8,
-    # and decreasing with t from 12 to 20
-    a = -0.0540937
-    b = 0.330319
-    c = -0.0383795
-    d = 0.00218635
-    e = -5.46589e-05
-    y = a + b*t + c*t*t + d*t*t*t + e*t*t*t*t
-    if y < 0.0:
-        y = 0.0
-    if y > 1.0:
-        y = 1.0
-    return round(y, 2)
+    if t >= acc_t and t <= acc_t + fast_t:
+        # during fast time, fast should be returned
+        return fast
+
+    # increase from 0.0 to fast during acceleration
+    if t <= acc_t:
+        # first calculate an increase from 0.0 to 1.0
+        # scale acc_t to match the list on the acceleration curve
+        tacc = t * 8.0 / acc_t    # when acc_t = 8, tacc = t
+        lowindex = int(tacc)
+        highindex = lowindex + 1
+        diff = c[highindex] - c[lowindex]
+        y = diff*tacc + c[lowindex] - diff* lowindex
+        # scale 1.0 to be fast
+        speed = y * fast
+        return round(speed, 3)
+
+
+    # for the deceleration, treat time in the negative direction
+    # so rather than a decrease from 1.0 to 0.0, it again looks like
+    # an increase from 0.0 to 1.0
+
+    s = duration - t
+    if s >= dec_t:
+        return fast
+    # scale dec_t to match the list on the acceleration curve
+    sdec = s * 8.0 / dec_t
+    lowindex = int(sdec)
+    highindex = lowindex + 1
+    diff = c[highindex] - c[lowindex]
+    y = diff*sdec + c[lowindex] - diff* lowindex
+    # 1.0 should become 'fast' and 0.0 should become 'slow'
+    speed = (fast - slow)*y + slow
+    if speed < 0.0:
+        speed = 0.0
+    return round(speed, 3)
 
 
 

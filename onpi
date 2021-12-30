@@ -1,8 +1,0 @@
-
-To connect to pi
-ssh 192.168.1.87
-
-If you want gui
-vncserver -Authentication VncAuth :1
-
-
