@@ -14,6 +14,14 @@ Then log in as user bernard on the pi and generate ssh keys.
 
 ssh-keygen -t rsa -b 4096 -C “bernie@skipole.co.uk”
 
+The public key needs to be passed to the remscope web server, so copy the contents fro the pi file:
+
+~/.ssh/id_rsa.pub
+
+and set it in the web server file
+
+~/.ssh/authorized_keys
+
 
 From laptop, swap ssh keys with the pi, as user bernard on laptop:
 
