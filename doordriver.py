@@ -1019,7 +1019,7 @@ def curve(t, acc_t, fast_t, dec_t, slow_t, fast, slow):
        slow is the slow speed, provide a float, this is the slow door speed which typically
        would take the door to a limit stop switch."""
 
-    assert fast > slow
+    assert fast > slow > 0.0
 
     duration = acc_t + fast_t + dec_t
 
@@ -1030,12 +1030,12 @@ def curve(t, acc_t, fast_t, dec_t, slow_t, fast, slow):
     if t >= duration:
         return slow
 
-    # this list must have nine elements describing an acceleration curve from 0.0 to 1.0
-    c = [0.0, 0.05, 0.15, 0.3, 0.5, 0.7, 0.85, 0.95, 1.0]
-
     if t >= acc_t and t <= acc_t + fast_t:
         # during fast time, fast should be returned
         return fast
+
+    # this list must have nine elements describing an acceleration curve from 0.0 to 1.0
+    c = [0.0, 0.05, 0.15, 0.3, 0.5, 0.7, 0.85, 0.95, 1.0]
 
     # increase from 0.0 to fast during acceleration
     if t <= acc_t:
@@ -1046,6 +1046,8 @@ def curve(t, acc_t, fast_t, dec_t, slow_t, fast, slow):
         highindex = lowindex + 1
         diff = c[highindex] - c[lowindex]
         y = diff*tacc + c[lowindex] - diff* lowindex
+        if y < 0.0:
+            y = 0.0
         # scale 1.0 to be fast
         speed = y * fast
         return round(speed, 3)
@@ -1064,10 +1066,10 @@ def curve(t, acc_t, fast_t, dec_t, slow_t, fast, slow):
     highindex = lowindex + 1
     diff = c[highindex] - c[lowindex]
     y = diff*sdec + c[lowindex] - diff* lowindex
+    if y < 0.0:
+        y = 0.0
     # 1.0 should become 'fast' and 0.0 should become 'slow'
     speed = (fast - slow)*y + slow
-    if speed < 0.0:
-        speed = 0.0
     return round(speed, 3)
 
 
