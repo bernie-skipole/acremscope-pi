@@ -69,7 +69,7 @@ def start_call(called_ident, skicall):
     "When a call is initially received this function is called."
     # to serve static files, you can map a url to a server static directory
     # the user does not have to be logged in to access these
-    servedfile = skicall.map_url_to_server("images", "/home/bernard/indiblobs", "application/octet-stream")
+    servedfile = skicall.map_url_to_server("images", "/home/bernard/indiblobs")
     if servedfile:
         return servedfile
 
