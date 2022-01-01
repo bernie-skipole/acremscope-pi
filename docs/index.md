@@ -1,6 +1,8 @@
 ## Pi build
 
-With the latest Raspberry Pi os, create the user bernard, with passwords for both the bernard and pi usernames.
+With the latest Raspberry Pi os, Enable SSH
+
+Create the user bernard, with passwords for both the bernard and pi usernames.
 
 apt-get update
 
@@ -8,18 +10,19 @@ apt-get upgrade
 
 adduser bernard
 
-Enable ssh, and generate ssh keys.
+Then log in as user bernard on the pi and generate ssh keys.
 
 ssh-keygen -t rsa -b 4096 -C “bernie@skipole.co.uk”
 
-From laptop, swap ssh keys with the pi, as user bernard:
 
-ssh-copy-id bernard@pi_ip_address
+From laptop, swap ssh keys with the pi, as user bernard on laptop:
+
+ssh-copy-id bernard@pi-ip-address
 
 Alternatively, your public key is in
 ~/.ssh/id_rsa.pub
 
-and this can be copied to a remote file
+and this can be copied to a remote file on the pi
 ~/.ssh/authorized_keys
 
 Back on pi, as user pi (bernard does not have sudo access)
@@ -39,6 +42,8 @@ redis-server --version
 gives version 6.xxxxx
 
 apt-get install python3-venv
+
+apt-get install git
 
 login as bernard
 
@@ -62,8 +67,13 @@ this also pulls in packages skipole, waitress, redis, paho-mqtt, indi-mr
 
 Create a folder ~/indiblobs
 
-Create a folder ~/indi and copy files from this repository into it , and install the services
+From home folder ~ clone files from this repository
 
+git clone https://github.com/bernie-skipole/acremscope-pi.git
+
+This creates directory ~/acremscope-pi with the repository files beneath it
+
+The following services now need to be copied:
 
 mqtttunnel.service
 
