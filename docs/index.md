@@ -1,6 +1,18 @@
 ## Pi build
 
-With the latest Raspberry Pi os, Enable SSH
+With the latest Raspberry Pi os, Using raspi-config:
+
+Enable SSH,
+
+Enable the UART for connection to a pico:
+
+Choose Interfacing Options
+
+Choose Serial
+
+Select No for login shell
+
+Select Yes for serial port hardware to be enabled.
 
 Create the user bernard, with passwords for both the bernard and pi usernames.
 

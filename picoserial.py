@@ -113,7 +113,7 @@ def sender(data, ser, rconn):
 if __name__ == "__main__":
 
     # create a redis connection
-    rconn = redis.StrictRedis(host='localhost', port=6379, db=0)
+    rconn = redis.Redis(host='localhost', port=6379, db=0)
 
     ps = rconn.pubsub(ignore_subscribe_messages=True)
     ps.psubscribe('tx_to_pico')
@@ -123,6 +123,8 @@ if __name__ == "__main__":
 
     # If another process wants to set the LED value, it uses redis to publish on channel 'tx_to_pico'
     # rconn.publish('tx_to_pico', 'pico_led_On')
+
+    print("Serial port /dev/serial0 opened at 115200 bit rate")
 
     # two seconds or so of flashing the led to synchronize data packets
     for count in range(0,5):
@@ -134,7 +136,6 @@ if __name__ == "__main__":
         sender(b'pico_led_Off', ser, rconn)
         time.sleep(0.1)
         receiver(ser, rconn)
-
 
     # blocks and communicates between redis and the serial port
     while True:
