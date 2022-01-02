@@ -529,9 +529,9 @@ class Monitor:
                 continue
             # status has changed
             if status:
-                xmldata = self.setlightvector(status, state="Alert")
+                xmldata = self.setlightvector(status, message="Communicating with pico OK")
             else:
-                xmldata = self.setlightvector(status, state="Ok")
+                xmldata = self.setlightvector(status, message="Communicating with pico has failed")
             self.sender.append(ET.tostring(xmldata))
 
 
