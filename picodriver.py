@@ -530,8 +530,16 @@ class Monitor:
             # status has changed
             if status:
                 xmldata = self.setlightvector(status, message="Communicating with pico OK")
+                # send a site message
+                xmlmessage = ET.Element('message')
+                xmlmessage.set("message", "Pico operational")
+                self.sender.append(ET.tostring(xmlmessage))
             else:
                 xmldata = self.setlightvector(status, message="Communicating with pico has failed")
+                # send a site message
+                xmlmessage = ET.Element('message')
+                xmlmessage.set("message", "Cannot access pico, operations via the pico board may not be valid")
+                self.sender.append(ET.tostring(xmlmessage))
             self.sender.append(ET.tostring(xmldata))
 
 
