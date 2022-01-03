@@ -496,7 +496,7 @@ class Monitor:
 
 
     async def update(self):
-        "Call the pico every 15 seconds, and check an ech back is received"
+        "Call the pico every 15 seconds, and check an echo back is received"
         while True:
             # every 15 seconds, request a monitor
 
@@ -517,23 +517,26 @@ class Monitor:
                 status = True
             else:
                 status = False
-            if status == self.status:
-                # no change to the current status, do not send anything
-                continue
-            # status has changed
+            # so send both a system message and a setlightvector every 15 seconds
             if status:
                 xmldata = self.setlightvector(status, message="Communicating with pico OK")
                 # send a site message
-                xmlmessage = ET.Element('message')
-                xmlmessage.set("message", "Pico operational")
-                self.sender.append(ET.tostring(xmlmessage))
+                self.sendsitemessage("System operational")
             else:
                 xmldata = self.setlightvector(status, message="Communicating with pico has failed")
                 # send a site message
-                xmlmessage = ET.Element('message')
-                xmlmessage.set("message", "Cannot access pico, operations via the pico board may not be valid")
-                self.sender.append(ET.tostring(xmlmessage))
+                self.sendsitemessage("Cannot access pico, operations via the pico board may not be valid")
             self.sender.append(ET.tostring(xmldata))
+
+
+    def sendsitemessage(self, message):
+        "Sends a site message"
+        # note - limit timestamp characters to :21 to avoid long fractions of a second 
+        timestamp = datetime.utcnow().isoformat(sep='T')[:21]
+        xmlmessage = ET.Element('message')
+        xmlmessage.set("message", message)
+        xmlmessage.set("timestamp", timestamp)
+        self.sender.append(ET.tostring(xmlmessage))
 
 
     def getvector(self, root):
@@ -608,8 +611,12 @@ class Monitor:
         if message is not None:
             xmldata.set("message", message)
 
-        if status == self.status:
-            return xmldata
+         # if status == self.status:
+         #   return xmldata
+
+         # for this driver, a state is sent, even if there has been no change, in case
+         # communications with web server has been interrupted, so web server always gets
+         # a refresh
 
         self.status = status
 
