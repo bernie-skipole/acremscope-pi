@@ -280,18 +280,30 @@ class Roof:
                 if self.lights.status == "CLOSED":
                     self.leftdoor.startdoor(True)
                     self.rightdoor.startdoor(True)
+                elif self.lights.status == "OPEN":
+                    # already open, send ok state back
+                    self.sendsetswitchvectorok()
             elif (pn == 'SHUTTER_OPEN') and (content == "Off"):
                 if self.lights.status == "OPEN":
                     self.leftdoor.startdoor(False)
                     self.rightdoor.startdoor(False)
+                elif self.lights.status == "CLOSED":
+                    # already closed, send ok state back
+                    self.sendsetswitchvectorok()
             elif (pn == 'SHUTTER_CLOSE') and (content == "On"):
                 if self.lights.status == "OPEN":
                     self.leftdoor.startdoor(False)
                     self.rightdoor.startdoor(False)
+                elif self.lights.status == "CLOSED":
+                    # already closed, send ok state back
+                    self.sendsetswitchvectorok()
             elif (pn == 'SHUTTER_CLOSE') and (content == "Off"):
                 if self.lights.status == "CLOSED":
                     self.leftdoor.startdoor(True)
                     self.rightdoor.startdoor(True)
+                elif self.lights.status == "OPEN":
+                    # already open, send ok state back
+                    self.sendsetswitchvectorok()
 
 
     def defswitchvector(self):
@@ -333,6 +345,19 @@ class Roof:
         xmldata.append(se_close)
 
         return xmldata
+
+
+    def sendsetswitchvectorok(self):
+        "Sends a setswitchvector with a state of ok"
+        # note - limit timestamp characters to :21 to avoid long fractions of a second 
+        timestamp = datetime.utcnow().isoformat(sep='T')[:21]
+        xmldata = ET.Element('setSwitchVector')
+        xmldata.set("device", self.device)
+        xmldata.set("name", self.name)
+        xmldata.set("timestamp", timestamp)
+        xmldata.set("state", "Ok")
+        # appends the xml data to be sent to the sender deque object
+        self.sender.append(ET.tostring(xmldata))
 
 
     def setswitchvector(self, status, state=None, message=None):
