@@ -47,7 +47,7 @@ def driver():
     "Blocking call"
 
     # create a redis connection
-    rconn = redis.StrictRedis(host='localhost', port=6379, db=0)
+    rconn = redis.Redis(host='localhost', port=6379, db=0)
 
     # create a deque, data to be sent to indiserver is appended to this
     sender = collections.deque(maxlen=100)
@@ -60,37 +60,30 @@ def driver():
     temperature = Temperature(device, rconn, sender)
     monitor = Monitor(device, rconn, sender)
 
+    connections = _Driver(sender, led, temperature, monitor)
 
-    # now start eventloop to read and write to stdin, stdout
-    loop = asyncio.get_event_loop()
-
-    connections = _Driver(loop, sender, led, temperature, monitor)
-
-    while True:
-        try:
-            loop.run_until_complete(connections.handle_data())
-        finally:
-            loop.close()
+    asyncio.run(connections.handle_data())
 
 
 class _Driver:
 
-    def __init__(self, loop, sender, *items):
+    def __init__(self, sender, *items):
         "Sets the data used by the data handler"
-        self.loop = loop
         self.sender = sender
         self.items = items
 
+
     async def handle_data(self):
         """handle data via stdin and stdout"""
-        reader = asyncio.StreamReader(loop=self.loop)
-        reader_protocol = asyncio.StreamReaderProtocol(reader, loop=self.loop)
-        await self.loop.connect_read_pipe( lambda: reader_protocol, sys.stdin)
+        loop = asyncio.get_running_loop()
+        reader = asyncio.StreamReader(loop=loop)
+        reader_protocol = asyncio.StreamReaderProtocol(reader, loop=loop)
+        await loop.connect_read_pipe( lambda: reader_protocol, sys.stdin)
 
-        writer_transport, writer_protocol = await self.loop.connect_write_pipe(
+        writer_transport, writer_protocol = await loop.connect_write_pipe(
                                                        lambda: asyncio.Protocol(),
                                                        sys.stdout)
-        writer = asyncio.StreamWriter(writer_transport, writer_protocol, None, self.loop)
+        writer = asyncio.StreamWriter(writer_transport, writer_protocol, None, loop)
 
         # list of item update methods, each of which should be an awaitable
         itemlist = list(item.update() for item in self.items)
